@@ -1,0 +1,158 @@
+﻿using Business.CustomJWT;
+using Business.Interfaces;
+using Business.Interfaces.Implements.Business;
+using Business.Interfaces.Implements.Persons;
+using Business.Interfaces.Implements.SecurityAuthentication;
+using Business.Interfaces.PDF;
+using Business.Services.Business;
+using Data.Interfaz.IDataImplement.Business;
+using Entity.DTOs.Implements.Business.Contract;
+using Entity.DTOs.Implements.Business.ObligationMonth;
+using Entity.Infrastructure.Context;
+using MapsterMapper;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Moq;
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using Utilities.Exceptions;
+using Utilities.Messaging.Interfaces;
+using Xunit;
+
+namespace Test.Modulo.Business
+{
+    public class ContractServiceTests
+    {
+        private readonly Mock<IContractRepository> _contracts = new();
+        private readonly Mock<IObligationMonthService> _obligationSvc = new();
+        private readonly Mock<IPersonService> _personSvc = new();
+        private readonly Mock<IEstablishmentService> _estSvc = new();
+        private readonly Mock<IUserService> _userSvc = new();
+        private readonly Mock<ISendCode> _email = new();
+        private readonly Mock<IMapper> _mapper = new();
+        private readonly Mock<ICurrentUser> _currentUser = new();
+        private readonly Mock<IUserContextService> _userCtx = new();
+        private readonly Mock<IContractPdfGeneratorService> _contractPdfService = new();
+        private readonly Mock<IUnitOfWork> _uow = new();
+        private readonly Mock<ILogger<ContractService>> _logger = new();
+        private readonly ApplicationDbContext _ctx;
+        private readonly ContractService _service;
+
+        private readonly DateTime _fixedDate = new DateTime(2025, 9, 18);
+
+        public ContractServiceTests()
+        {
+            var opt = new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+            _ctx = new ApplicationDbContext(opt);
+
+            _service = new ContractService(
+                _contracts.Object,
+                _personSvc.Object,
+                _estSvc.Object,
+                _userSvc.Object,
+                _mapper.Object,
+                _email.Object,
+                _ctx,
+                _currentUser.Object,
+                _obligationSvc.Object,
+                _userCtx.Object,
+                _contractPdfService.Object,
+                _uow.Object,
+                _logger.Object);
+        }
+
+        [Fact]
+        public async Task GetMine_Admin_ReturnsMappedCards()
+        {
+            _currentUser.SetupGet(u => u.EsAdministrador).Returns(true);
+
+            var cards = new List<ContractCardDto>
+            {
+                new ContractCardDto(
+                    1, 10, "P", "D", "PH", null, null,
+                    _fixedDate, _fixedDate, 100, 50, true)
+            };
+
+            _contracts.Setup(r => r.GetCardsAllAsync())
+                .ReturnsAsync(cards);
+
+            var result = await _service.GetMineAsync();
+
+            Assert.Single(result);
+            Assert.Equal("P D", result[0].PersonFullName);
+        }
+
+        [Fact]
+        public async Task GetMine_NonAdmin_WithoutPerson_Throws()
+        {
+            _currentUser.SetupGet(u => u.EsAdministrador).Returns(false);
+            _currentUser.SetupGet(u => u.PersonId).Returns((int?)null);
+
+            var ex = await Assert.ThrowsAsync<BusinessException>(
+                () => _service.GetMineAsync());
+
+            Assert.Contains("Usuario no tiene persona asociada", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task GetMine_NonAdmin_WithPerson_ReturnsMappedCards()
+        {
+            _currentUser.SetupGet(u => u.EsAdministrador).Returns(false);
+            _currentUser.SetupGet(u => u.PersonId).Returns(99);
+
+            var cards = new List<ContractCardDto>
+            {
+                new ContractCardDto(
+                    2, 99, "Z", "D", "PH", null, null,
+                    _fixedDate, _fixedDate, 200, 100, false)
+            };
+
+            _contracts.Setup(r => r.GetCardsByPersonAsync(99))
+                .ReturnsAsync(cards);
+
+            var result = await _service.GetMineAsync();
+
+            Assert.Single(result);
+            Assert.Equal(99, result[0].PersonId);
+            Assert.Equal("Z D", result[0].PersonFullName);
+        }
+
+        [Fact]
+        public async Task GetObligations_InvalidId_Throws()
+        {
+            var ex = await Assert.ThrowsAsync<BusinessException>(
+                () => _service.GetObligationsAsync(0));
+
+            Assert.Contains("Id de contrato inválido", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task GetObligations_DelegatesToService()
+        {
+            _obligationSvc.Setup(s => s.GetByContractAsync(5))
+                .ReturnsAsync(new List<ObligationMonthSelectDto> { new() });
+
+            var result = await _service.GetObligationsAsync(5);
+
+            Assert.Single(result);
+            _obligationSvc.Verify(s => s.GetByContractAsync(5), Times.Once);
+        }
+
+        [Fact(Skip = "EF InMemory no soporta transacciones; cubrir en integración relacional")]
+        public async Task RunExpirationSweep_ReturnsRepositoryResults()
+        {
+            _contracts.Setup(r => r.DeactivateExpiredAsync(It.IsAny<DateTime>()))
+                .ReturnsAsync(new List<int> { 1, 2 });
+            _contracts.Setup(r => r.ReleaseEstablishmentsForExpiredAsync(It.IsAny<DateTime>()))
+                .ReturnsAsync(3);
+
+            var result = await _service.RunExpirationSweepAsync(CancellationToken.None);
+
+            Assert.Equal(2, result.DeactivatedContractIds.Count);
+            Assert.Equal(3, result.ReactivatedEstablishments);
+        }
+    }
+}
