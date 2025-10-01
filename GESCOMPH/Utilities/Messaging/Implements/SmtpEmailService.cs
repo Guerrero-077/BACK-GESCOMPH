@@ -15,7 +15,7 @@ namespace Utilities.Messaging.Implements
         private readonly IConfiguration _config;
         private readonly ILogger<SmtpEmailService>? _logger;
 
-        private const string BrandName = "GESCOMPAH";
+        private const string BrandName = "GESCOMPH";
         private const string BrandPrimary = "#2E7D32";
         private const string BrandAccent = "#16a34a";
         private const string BrandText = "#1f2937";
@@ -162,7 +162,7 @@ namespace Utilities.Messaging.Implements
                         </p>";
 
             var html = WrapEmail("Recuperación de contraseña", content);
-            await SendEmailAsync(emailReceptor, "GESCOMPAH – Recuperación de contraseña", html);
+            await SendEmailAsync(emailReceptor, "GESCOMPH – Recuperación de contraseña", html);
         }
 
         public async Task SendTemporaryPasswordAsync(string email, string fullName, string tempPassword)
@@ -178,7 +178,7 @@ namespace Utilities.Messaging.Implements
                     <p style='margin-top:16px;'>Por seguridad, deberás cambiarla en tu <strong>primer ingreso</strong> al sistema.</p>";
 
             var html = WrapEmail("Tu cuenta fue creada", content);
-            await SendEmailAsync(email, "GESCOMPAH – Tu cuenta fue creada", html);
+            await SendEmailAsync(email, "GESCOMPH – Tu cuenta fue creada", html);
         }
 
         public async Task SendContractWithPdfAsync(string email, string fullName, string contractNumber, byte[] pdfBytes)
@@ -200,7 +200,7 @@ namespace Utilities.Messaging.Implements
                     <p>Si tiene alguna pregunta o requiere aclaraciones, no dude en contactarnos.</p>";
 
             var html = WrapEmail("Contrato de Arrendamiento Generado", content);
-            await SendEmailWithAttachmentAsync(email, "GESCOMPAH – Contrato de Arrendamiento", html, pdfBytes, $"Contrato_{contractNumber}.pdf");
+            await SendEmailWithAttachmentAsync(email, "GESCOMPH – Contrato de Arrendamiento", html, pdfBytes, $"Contrato_{contractNumber}.pdf");
         }
 
         private async Task SendEmailWithAttachmentAsync(string to, string subject, string htmlBody, byte[] attachmentBytes, string attachmentName)
