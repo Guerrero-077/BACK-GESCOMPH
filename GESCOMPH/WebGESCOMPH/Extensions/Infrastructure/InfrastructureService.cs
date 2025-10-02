@@ -57,7 +57,7 @@ namespace WebGESCOMPH.Extensions.Infrastructure
             services.AddHangfireServices(configuration);
 
             // Proxy/HTTPS (ngrok)
-            services.AddProxyAndHttps(configuration);
+            // services.AddProxyAndHttps(configuration); // Desactivado temporalmente (sin ngrok).
 
             // Otros servicios transversales
             services.AddScoped<IContractPdfGeneratorService, ContractPdfService>();
@@ -68,3 +68,5 @@ namespace WebGESCOMPH.Extensions.Infrastructure
         }
     }
 }
+
+

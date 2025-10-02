@@ -1,4 +1,4 @@
-﻿using WebGESCOMPH.Extensions.Composition;
+using WebGESCOMPH.Extensions.Composition;
 using WebGESCOMPH.Extensions.Infrastructure;
 using WebGESCOMPH.Extensions.Presentation;
 using WebGESCOMPH.Extensions.RealTime;
