@@ -1,4 +1,4 @@
-﻿using Entity.Infrastructure.Context;
+﻿    using Entity.Infrastructure.Context;
 using Microsoft.EntityFrameworkCore;
 
 namespace WebGESCOMPH.Extensions.Infrastructure
@@ -34,20 +34,20 @@ namespace WebGESCOMPH.Extensions.Infrastructure
                             }
                         case "postgres":
                             {
-                                var ctx = sp.GetService<PostgresDbContext>();
+                                /*var ctx = sp.GetService<PostgresDbContext>();
                                 if (ctx == null) { log.LogWarning("PostgreSQL no configurado: se omite."); break; }
                                 log.LogInformation("Migrando PostgreSQL...");
                                 ctx.Database.Migrate();
-                                log.LogInformation("Migración completada para Postgres");
+                                log.LogInformation("Migración completada para Postgres");*/
                                 break;
                             }
                         case "mysql":
                             {
-                                var ctx = sp.GetService<MySqlApplicationDbContext>();
+                                /*var ctx = sp.GetService<MySqlApplicationDbContext>();
                                 if (ctx == null) { log.LogWarning("MySQL no configurado: se omite."); break; }
                                 log.LogInformation("Migrando MySQL...");
                                 ctx.Database.Migrate();
-                                log.LogInformation("Migración completada para MySql");
+                                log.LogInformation("Migración completada para MySql");*/
                                 break;
                             }
                         default:

@@ -23,7 +23,7 @@
     <ProjectReference Include="..\Business\Business.csproj" />
     <ProjectReference Include="..\Data\Data.csproj" />
     <ProjectReference Include="..\Entity\Entity.csproj" />
-    <ProjectReference Include="..\WebGESCOMPAH\WebGESCOMPH.csproj" />
+    <ProjectReference Include="..\WebGESCOMPH\WebGESCOMPH.csproj" />
     <ProjectReference Include="..\WebGESCOMPH\WebGESCOMPH.csproj" />
   </ItemGroup>
 

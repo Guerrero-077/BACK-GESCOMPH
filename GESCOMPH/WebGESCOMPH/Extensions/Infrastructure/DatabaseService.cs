@@ -10,8 +10,8 @@ namespace WebGESCOMPH.Extensions.Infrastructure
         public static IServiceCollection AddDatabase(this IServiceCollection services, IConfiguration config)
         {
             var sql = config.GetConnectionString("SqlServer");
-            var pg = config.GetConnectionString("Postgres");
-            var my = config.GetConnectionString("MySql");
+            //var pg = config.GetConnectionString("Postgres");
+            //var my = config.GetConnectionString("MySql");
 
             if (!string.IsNullOrWhiteSpace(sql))
             {
@@ -24,7 +24,7 @@ namespace WebGESCOMPH.Extensions.Infrastructure
                     }));
             }
 
-            if (!string.IsNullOrWhiteSpace(pg))
+            /*if (!string.IsNullOrWhiteSpace(pg))
             {
                 services.AddDbContext<PostgresDbContext>(opt =>
                     opt.UseNpgsql(pg, n =>
@@ -46,7 +46,7 @@ namespace WebGESCOMPH.Extensions.Infrastructure
                     .EnableDetailedErrors()
                     .EnableSensitiveDataLogging() // ⚠️ solo en desarrollo
                 );
-            }
+            }*/
 
             return services;
         }

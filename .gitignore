@@ -419,4 +419,10 @@ FodyWeavers.xsd
 
 
 # Ignorar migraciones de Entity Framework
-Back/WebGESCOMPAH/Entity/Migrations/
+GESCOMPH/Entity/Migrations/
+
+# Ignorar Visual Studio
+.vs/
+
+# Ignorar completamente VS Code
+.vscode/

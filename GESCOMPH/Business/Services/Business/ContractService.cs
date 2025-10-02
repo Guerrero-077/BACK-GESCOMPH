@@ -14,9 +14,9 @@ using Entity.Infrastructure.Context;
 using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Linq.Expressions;
 using Utilities.Exceptions;
 using Utilities.Messaging.Interfaces;
-using System.Linq.Expressions;
 
 namespace Business.Services.Business
 {
@@ -105,7 +105,6 @@ namespace Business.Services.Business
             }
 
             var contracts = await _contractRepository.GetCardsByPersonAsync(_user.PersonId.Value);
-
             return contracts.ToList().AsReadOnly();
         }
 
@@ -184,6 +183,10 @@ namespace Business.Services.Business
         private string ComposeFullName(PersonSelectDto person)
             => $"{person.FirstName} {person.LastName}".Trim();
 
+        /// <summary>
+        /// Manejo de post-commit: envío de correos y generación de obligaciones.
+        /// Fire-and-forget para que nunca bloquee la creación del contrato.
+        /// </summary>
         private async Task SchedulePostCommitAsync(
             int contractId,
             (int userId, bool created, string? tempPassword) userResult,
@@ -191,30 +194,33 @@ namespace Business.Services.Business
             string fullName,
             ContractSelectDto? contractSnapshot)
         {
-            // ---------- Enviar contraseña temporal inmediatamente ----------
+            // ---------- Enviar contraseña temporal en background ----------
             if (userResult.created && !string.IsNullOrWhiteSpace(userResult.tempPassword) && !string.IsNullOrWhiteSpace(email))
             {
-                try
+                _ = Task.Run(async () =>
                 {
-                    _logger.LogInformation("Enviando contraseña temporal a {Email} para {Name}", email, fullName);
-                    await _emailService.SendTemporaryPasswordAsync(email!, fullName, userResult.tempPassword!);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error enviando contraseña temporal a {Email}", email);
-                }
+                    try
+                    {
+                        _logger.LogInformation("Enviando contraseña temporal a {Email} para {Name}", email, fullName);
+                        await _emailService.SendTemporaryPasswordAsync(email!, fullName, userResult.tempPassword!);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error enviando contraseña temporal a {Email}", email);
+                    }
 
-                try
-                {
-                    _userContextService.InvalidateCache(userResult.userId);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error invalidando cache para usuario {UserId}", userResult.userId);
-                }
+                    try
+                    {
+                        _userContextService.InvalidateCache(userResult.userId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error invalidando cache para usuario {UserId}", userResult.userId);
+                    }
+                });
             }
 
-            // ---------- Generar obligaciones en post-commit ----------
+            // ---------- Generar obligaciones después del commit ----------
             _uow.RegisterPostCommit(async ct =>
             {
                 try
@@ -230,19 +236,25 @@ namespace Business.Services.Business
                 }
             });
 
-            // ---------- Enviar correo con PDF inmediatamente ----------
+            // ---------- Enviar correo con PDF en background ----------
             if (!string.IsNullOrWhiteSpace(email) && contractSnapshot != null)
             {
-                try
+                _ = Task.Run(async () =>
                 {
-                    var pdf = await _contractPdfService.GeneratePdfAsync(contractSnapshot);
-                    await _emailService.SendContractWithPdfAsync(email!, fullName, contractId.ToString("D6"), pdf);
-                    _logger.LogInformation("Correo de contrato enviado a {Email} con PDF {ContractId}", email, contractId);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error enviando PDF del contrato {ContractId} a {Email}", contractId, email);
-                }
+                    try
+                    {
+                        var pdf = await _contractPdfService.GeneratePdfAsync(contractSnapshot);
+                        await _emailService.SendContractWithPdfAsync(email!, fullName, contractId.ToString("D6"), pdf);
+
+                        _logger.LogInformation("Correo de contrato enviado a {Email} con PDF {ContractId}", email, contractId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex,
+                            "Error enviando correo/PDF del contrato {ContractId} a {Email}. El contrato sigue creado.",
+                            contractId, email);
+                    }
+                });
             }
         }
 
