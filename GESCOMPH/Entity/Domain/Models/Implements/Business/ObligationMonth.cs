@@ -13,6 +13,10 @@ namespace Entity.Domain.Models.Implements.Business
 
         public DateTime DueDate { get; set; }
 
+        // Atributo nullable que cumple la funcion de registrar la
+        // fecha en la que se pago la obligacion 
+        public DateTime? PaymentDate { get; set; }
+
         // Fotocopia de los parámetros usados este mes
         public decimal UvtQtyApplied { get; set; }
         public decimal UvtValueApplied { get; set; }

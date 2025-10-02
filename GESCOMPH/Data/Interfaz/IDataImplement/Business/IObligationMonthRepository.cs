@@ -7,5 +7,7 @@ namespace Data.Interfaz.IDataImplement.Business
     {
         Task<ObligationMonth?> GetByContractYearMonthAsync(int contractId, int year, int month);
         IQueryable<ObligationMonth> GetByContractQueryable(int contractId);
+        Task<decimal> GetTotalObligationsPaidByMonthAsync(int year, int month);
+        Task<decimal> GetTotalObligationsPaidByDayAsync(DateTime date);
     }
 }

@@ -80,6 +80,7 @@ namespace Business.Services.Business
             var existing = await _obligationRepository.GetByIdAsync(id)
                 ?? throw new BusinessException($"No existe obligación mensual con Id {id}.");
 
+            existing.PaymentDate = DateTime.UtcNow;
             existing.Status = "PAID";
             existing.Locked = true;
 
@@ -187,7 +188,15 @@ namespace Business.Services.Business
             return decimal.TryParse(raw, NumberStyles.Any, CultureInfo.CurrentCulture, out value);
         }
 
+        public async Task<decimal> GetTotalObligationsPaidByDayAsync(DateTime date)
+        {
+            return await _obligationRepository.GetTotalObligationsPaidByDayAsync(date);
+        }
 
+        public async Task<decimal> GetTotalObligationsPaidByMonthAsync(int year, int month)
+        {
+            return await _obligationRepository.GetTotalObligationsPaidByMonthAsync(year, month);
+        }
 
         protected override Expression<Func<ObligationMonth, string>>[] SearchableFields() =>
         [

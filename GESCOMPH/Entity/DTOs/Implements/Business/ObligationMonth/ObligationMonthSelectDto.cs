@@ -8,6 +8,9 @@ namespace Entity.DTOs.Implements.Business.ObligationMonth
         public int Year { get; set; }
         public int Month { get; set; }
         public DateTime DueDate { get; set; }
+        // Atributo nullable que cumple la funcion de registrar la
+        // fecha en la que se pago la obligacion 
+        public DateTime? PaymentDate { get; set; }
         public decimal UvtQtyApplied { get; set; }
         public decimal UvtValueApplied { get; set; }
         public decimal VatRateApplied { get; set; }
@@ -21,4 +24,3 @@ namespace Entity.DTOs.Implements.Business.ObligationMonth
         public bool Active { get; set; }
     }
 }
-

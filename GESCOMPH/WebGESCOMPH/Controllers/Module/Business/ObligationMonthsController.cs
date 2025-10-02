@@ -98,6 +98,47 @@ namespace WebGESCOMPH.Controllers.Module.Business
             return NoContent();
         }
 
+
+        /// <summary>
+        /// Metodos que se encargan de obtener el total de obligaciones pagadas por día y por mes.
+        /// </summary>
+        /// <returns></returns>
+        /// 
+        [HttpGet("TotalDay")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> GetTotalDay()
+        {
+            try
+            {
+                var totalDay = await _svc.GetTotalObligationsPaidByDayAsync(DateTime.UtcNow);
+                return Ok(totalDay);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error obteniendo total de obligaciones pagadas por día");
+                return BadRequest("Error obteniendo total de obligaciones pagadas por día");
+            }
+        }
+
+        [HttpGet("TotalMonth")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> GetTotalMonth()
+        {
+            try
+            {
+                var today = DateTime.UtcNow;
+                var totalMonth = await _svc.GetTotalObligationsPaidByMonthAsync(today.Year, today.Month);
+                return Ok(totalMonth);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error obteniendo total de obligaciones pagadas por mes");
+                return BadRequest("Error obteniendo total de obligaciones pagadas por mes");
+            }
+        }
+
         // ------------------------ Helpers ------------------------
         private (int year, int month) ResolvePeriod(int? year, int? month)
         {
