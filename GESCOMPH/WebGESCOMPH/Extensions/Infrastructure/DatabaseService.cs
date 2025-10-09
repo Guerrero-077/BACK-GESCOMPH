@@ -44,7 +44,7 @@ namespace WebGESCOMPH.Extensions.Infrastructure
                         m.EnableStringComparisonTranslations(); // para Contains, StartsWith, EndsWith
                     })
                     .EnableDetailedErrors()
-                    .EnableSensitiveDataLogging() // ⚠️ solo en desarrollo
+                    .EnableSensitiveDataLogging()
                 );
             }*/
 

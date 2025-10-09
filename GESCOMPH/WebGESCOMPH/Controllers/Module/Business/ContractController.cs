@@ -1,6 +1,8 @@
-﻿using Business.Interfaces.Implements.Business;
+using Business.Interfaces.Implements.Business;
 using Business.Interfaces.PDF;
+using System;
 using Entity.DTOs.Implements.Business.Contract;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
@@ -10,6 +12,7 @@ using WebGESCOMPH.RealTime;
 
 namespace WebGESCOMPH.Controllers.Module.Business
 {
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class ContractController : ControllerBase
@@ -40,6 +43,8 @@ namespace WebGESCOMPH.Controllers.Module.Business
         }
 
         [HttpPost]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public async Task<ActionResult<ContractSelectDto>> Post([FromBody] ContractCreateDto dto)
         {
             if (!ModelState.IsValid)
@@ -60,17 +65,19 @@ namespace WebGESCOMPH.Controllers.Module.Business
             }
             catch (BusinessException ex)
             {
-                _logger.LogWarning("Error de negocio: {Message}", ex.Message);
-                return BadRequest(new { error = ex.Message });
+                _logger.LogWarning(ex, "Error de negocio al crear contrato: {Message}", ex.Message);
+                throw;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error inesperado al crear contrato");
-                return StatusCode(500, new { error = "Error interno del servidor." });
+                throw;
             }
         }
 
-        [HttpGet("{id}")]
+        [HttpGet("{id:int}")]
+        [ProducesResponseType(typeof(ContractSelectDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetById(int id)
         {
             var contract = await _contractService.GetByIdAsync(id);
@@ -79,44 +86,91 @@ namespace WebGESCOMPH.Controllers.Module.Business
             return Ok(contract);
         }
 
+        [HttpPut("{id:int}")]
+        [ProducesResponseType(typeof(ContractSelectDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<ContractSelectDto>> Put(int id, [FromBody] ContractUpdateDto dto)
+        {
+            if (dto is null)
+                return BadRequest(new { detail = "El cuerpo de la solicitud no puede estar vacio." });
+
+            if (dto.Id != 0 && dto.Id != id)
+                return BadRequest(new { detail = "El ID del cuerpo no coincide con el ID de la ruta." });
+
+            dto.Id = id;
+
+            try
+            {
+                var updated = await _contractService.UpdateAsync(dto);
+
+                await _hub.Clients.All.SendAsync("contracts:mutated", new
+                {
+                    type = "updated",
+                    id,
+                    active = updated.Active,
+                    at = DateTime.UtcNow
+                });
+
+                return Ok(updated);
+            }
+            catch (BusinessException ex)
+            {
+                _logger.LogWarning(ex, "Error de negocio al actualizar contrato {Id}: {Message}", id, ex.Message);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error inesperado al actualizar contrato {Id}", id);
+                throw;
+            }
+        }
+
         [HttpPatch("{id:int}/estado")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         [ProducesResponseType(StatusCodes.Status409Conflict)]
-        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> ChangeActiveStatus(int id, [FromBody] ChangeActiveStatusRequest body)
         {
             try
             {
-                await _contractService.UpdateActiveStatusAsync(id, body.Active!.Value);
+                var active = body.Active!.Value;
+                await _contractService.UpdateActiveStatusAsync(id, active);
 
                 await _hub.Clients.All.SendAsync("contracts:mutated", new
                 {
                     type = "statusChanged",
                     id,
-                    active = body.Active!.Value,
+                    active,
                     at = DateTime.UtcNow
                 });
 
                 return NoContent();
             }
+            catch (BusinessException ex)
+            {
+                _logger.LogWarning(ex, "Error de negocio al actualizar estado del contrato {Id}: {Message}", id, ex.Message);
+                throw;
+            }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error actualizando el estado del contrato {Id}", id);
-                return StatusCode(500, new { error = "Error interno del servidor." });
+                _logger.LogError(ex, "Error inesperado al actualizar el estado del contrato {Id}", id);
+                throw;
             }
         }
 
-        [HttpDelete("{id}")]
+        [HttpDelete("{id:int}")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> Delete(int id)
         {
             try
             {
-                var contract = await _contractService.GetByIdAsync(id);
-                if (contract == null)
+                var existing = await _contractService.GetByIdAsync(id);
+                if (existing == null)
                     return NotFound();
 
-                await _contractService.DeleteAsync(id); // suponiendo que el service tiene DeleteAsync
+                await _contractService.DeleteAsync(id);
 
                 await _hub.Clients.All.SendAsync("contracts:mutated", new
                 {
@@ -127,21 +181,28 @@ namespace WebGESCOMPH.Controllers.Module.Business
 
                 return NoContent();
             }
+            catch (BusinessException ex)
+            {
+                _logger.LogWarning(ex, "Error de negocio al eliminar contrato {Id}: {Message}", id, ex.Message);
+                throw;
+            }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error borrando contrato {Id}", id);
-                return StatusCode(500, new { error = "Error interno del servidor." });
+                _logger.LogError(ex, "Error inesperado al eliminar contrato {Id}", id);
+                throw;
             }
         }
 
-        [HttpGet("{id}/pdf")]
+        [HttpGet("{id:int}/pdf")]
+        [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> DownloadContractPdf(int id)
         {
             var contract = await _contractService.GetByIdAsync(id);
             if (contract == null)
             {
                 _logger.LogWarning("Contrato con ID {Id} no encontrado.", id);
-                return NotFound(new { message = $"No se encontró un contrato con ID {id}" });
+                return NotFound(new { message = $"No se encontro un contrato con ID {id}" });
             }
 
             try
@@ -182,11 +243,25 @@ namespace WebGESCOMPH.Controllers.Module.Business
         }
 
         [HttpPost("expire/run")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
         public async Task<IActionResult> RunExpirationNow(CancellationToken ct)
         {
-            await _contractService.RunExpirationSweepAsync(ct);
-            await _hub.Clients.All.SendAsync("contracts:expired", new { at = DateTime.UtcNow }, ct);
-            return NoContent();
+            var sweep = await _contractService.RunExpirationSweepAsync(ct);
+            var deactivated = sweep.DeactivatedContractIds ?? Array.Empty<int>();
+
+            var payload = new
+            {
+                deactivatedIds = deactivated,
+                counts = new
+                {
+                    deactivatedContracts = deactivated.Count,
+                    reactivatedEstablishments = sweep.ReactivatedEstablishments
+                },
+                at = DateTime.UtcNow
+            };
+
+            await _hub.Clients.All.SendAsync("contracts:expired", payload, ct);
+            return Ok(payload);
         }
     }
 }

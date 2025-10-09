@@ -1,4 +1,4 @@
-﻿using Business.Interfaces.Implements.Business;
+using Business.Interfaces.Implements.Business;
 using Business.Repository;
 using Business.Services.Validation;
 using Data.Interfaz.IDataImplement.Business;
@@ -18,6 +18,7 @@ using System.Globalization;
 using System.Linq;
 using System.Linq.Expressions;
 using Utilities.Exceptions;
+using Utilities.Helpers.Business;
 
 namespace Business.Services.Business
 {
@@ -30,6 +31,7 @@ namespace Business.Services.Business
         IEstablishmentService
     {
         private readonly IEstablishmentsRepository _repo;
+        private readonly ApplicationDbContext _context;
         private readonly ILogger<EstablishmentService> _logger;
         private readonly IDataGeneric<SystemParameter> _systemParamRepository;
 
@@ -42,6 +44,7 @@ namespace Business.Services.Business
         ) : base(repo, mapper)
         {
             _repo = repo;
+            _context = context;
             _logger = logger;
             _systemParamRepository = systemParamRepository;
         }
@@ -140,6 +143,36 @@ namespace Business.Services.Business
             {
                 _logger.LogError(ex, "Error al actualizar establecimiento {Id}", dto.Id);
                 throw new BusinessException("Error al actualizar el establecimiento.", ex);
+            }
+        }
+
+        public override async Task<bool> DeleteAsync(int id)
+        {
+            try
+            {
+                BusinessValidationHelper.ThrowIfZeroOrLess(id, "El ID debe ser mayor que cero.");
+
+                var hasContracts = await _context.premisesLeaseds.AnyAsync(p => p.EstablishmentId == id && !p.IsDeleted);
+                if (hasContracts)
+                {
+                    throw new BusinessException("No se puede eliminar un establecimiento que tiene contratos asociados.");
+                }
+
+                var entity = await _repo.GetByIdAnyAsync(id);
+                if (entity == null)
+                {
+                    return false;
+                }
+
+                return await _repo.DeleteAsync(id);
+            }
+            catch (DbUpdateException dbx)
+            {
+                throw new BusinessException($"No se pudo eliminar el registro con ID {id} por restricciones de datos.", dbx);
+            }
+            catch (Exception ex)
+            {
+                throw new BusinessException($"Error al eliminar el registro con ID {id}.", ex);
             }
         }
 
@@ -286,4 +319,3 @@ namespace Business.Services.Business
 
     }
 }
-
