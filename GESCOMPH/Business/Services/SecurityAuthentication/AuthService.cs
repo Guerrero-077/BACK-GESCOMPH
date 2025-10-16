@@ -1,0 +1,141 @@
+﻿using Business.Interfaces;
+using Business.Interfaces.Implements.SecurityAuthentication;
+using Data.Interfaz.IDataImplement.Persons;
+using Data.Interfaz.IDataImplement.SecurityAuthentication;
+using Entity.Domain.Models.Implements.Persons;
+using Entity.Domain.Models.Implements.SecurityAuthentication;
+using Entity.DTOs.Implements.SecurityAuthentication.Auth;
+using Entity.DTOs.Implements.SecurityAuthentication.Auth.RestPasword;
+using Entity.DTOs.Implements.SecurityAuthentication.Me;
+using Entity.DTOs.Implements.SecurityAuthentication.User;
+using MapsterMapper;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Logging;
+using Utilities.Exceptions;
+using Utilities.Messaging.Interfaces;
+
+namespace Business.Services.SecurityAuthentication
+{
+    /// <summary>
+    /// Servicio de autenticación. El contexto de usuario (/me) lo construye UserContextService.
+    /// </summary>
+    public class AuthService(
+        IPasswordHasher<User> passwordHasher,
+        IUserRepository userData,
+        ILogger<AuthService> logger,
+        IRolUserService rolUserData,
+        IMapper mapper,
+        ISendCode emailService,
+        IPasswordResetCodeRepository passwordResetRepo,
+        IUserContextService userContextService,
+        IPersonRepository personRepository,
+        IToken tokenService
+    ) : IAuthService
+    {
+        private readonly IPasswordHasher<User> _passwordHasher = passwordHasher;
+        private readonly IUserRepository _userRepository = userData;
+        private readonly IRolUserService _rolUserData = rolUserData;
+        private readonly ILogger<AuthService> _logger = logger;
+        private readonly IMapper _mapper = mapper;
+        private readonly ISendCode _emailService = emailService;
+        private readonly IPasswordResetCodeRepository _passwordResetRepo = passwordResetRepo;
+        private readonly IUserContextService _userContext = userContextService;
+        private readonly IPersonRepository _personRepository = personRepository;
+        private readonly IToken _tokenService = tokenService;
+
+        public async Task<TokenResponseDto> LoginAsync(LoginDto dto)
+        {
+            var user = await AuthenticateAsync(dto);
+
+            var roles = await _rolUserData.GetRoleNamesByUserIdAsync(user.Id);
+
+            var userDto = _mapper.Map<UserAuthDto>(user);
+            userDto.Roles = roles;
+
+            return await _tokenService.GenerateTokensAsync(userDto);
+        }
+
+
+        public async Task<User> AuthenticateAsync(LoginDto dto)
+        {
+            var user = await _userRepository.GetAuthUserByEmailAsync(dto.Email)
+                ?? throw new UnauthorizedAccessException("Usuario o contraseña inválida.");
+
+            var pwdResult = _passwordHasher.VerifyHashedPassword(user, user.Password, dto.Password);
+            if (pwdResult == PasswordVerificationResult.Failed)
+                throw new UnauthorizedAccessException("Usuario o contraseña inválida.");
+
+            if (user.IsDeleted)
+                throw new UnauthorizedAccessException("La cuenta está eliminada o bloqueada.");
+
+            if (!user.Active)
+                throw new UnauthorizedAccessException("La cuenta está inactiva. Contacta al administrador.");
+
+            return user;
+        }
+
+
+
+        public async Task RequestPasswordResetAsync(string email)
+        {
+            var user = await _userRepository.GetByEmailAsync(email)
+                ?? throw new ValidationException("Correo no registrado");
+
+            var code = new Random().Next(100000, 999999).ToString();
+
+            var resetCode = new PasswordResetCode
+            {
+                Email = email,
+                Code = code,
+                Expiration = DateTime.UtcNow.AddMinutes(10)
+            };
+
+            await _passwordResetRepo.AddAsync(resetCode);
+            await _emailService.SendRecoveryCodeEmail(email, code);
+        }
+
+
+
+        public async Task ResetPasswordAsync(ConfirmResetDto dto)
+        {
+            var record = await _passwordResetRepo.GetValidCodeAsync(dto.Email, dto.Code)
+                ?? throw new ValidationException("Código inválido o expirado");
+
+            var user = await _userRepository.GetByEmailAsync(dto.Email)
+                ?? throw new ValidationException("Usuario no encontrado");
+
+            var hasher = new PasswordHasher<User>();
+            user.Password = hasher.HashPassword(user, dto.NewPassword);
+
+            await _userRepository.UpdateAsync(user);
+
+            record.IsUsed = true;
+            await _passwordResetRepo.UpdateAsync(record);
+
+            // Invalida contexto /me
+            _userContext.InvalidateCache(user.Id);
+        }
+
+
+        public async Task ChangePasswordAsync(ChangePasswordDto dto)
+        {
+            var user = await _userRepository.GetByIdAsync(dto.UserId)
+                       ?? throw new BusinessException("Usuario no encontrado.");
+
+            // Validar contraseña actual
+            var result = _passwordHasher.VerifyHashedPassword(user, user.Password, dto.CurrentPassword);
+            if (result == PasswordVerificationResult.Failed)
+                throw new BusinessException("La contraseña actual es incorrecta.");
+
+            // Hashear nueva contraseña
+            user.Password = _passwordHasher.HashPassword(user, dto.NewPassword);
+
+            await _userRepository.UpdateAsync(user);
+        }
+
+        //  Sedelega UserContextService:
+        public Task<UserMeDto> BuildUserContextAsync(int userId)
+            => _userContext.BuildUserContextAsync(userId);
+        
+    }
+}
