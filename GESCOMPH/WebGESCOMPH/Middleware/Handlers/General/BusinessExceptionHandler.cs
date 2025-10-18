@@ -3,7 +3,7 @@ using System.Net;
 using Utilities.Exceptions;
 using WebGESCOMPH.Middleware;
 
-namespace WebGESCOMPH.Middleware.Handlers
+namespace WebGESCOMPH.Middleware.Handlers.General
 {
     public class BusinessExceptionHandler : IExceptionHandler
     {

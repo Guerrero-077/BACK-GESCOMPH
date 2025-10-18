@@ -2,26 +2,26 @@
 using System.Net;
 using WebGESCOMPH.Middleware;
 
-namespace WebGESCOMPH.Middleware.Handlers
+namespace WebGESCOMPH.Middleware.Handlers.Network
 {
-    public class TimeoutExceptionHandler : IExceptionHandler
+    public class HttpRequestExceptionHandler : IExceptionHandler
     {
-        public int Priority => 48;
+        public int Priority => 47;
 
         public bool CanHandle(Exception exception)
-            => exception is TimeoutException || exception is TaskCanceledException;
+            => exception is HttpRequestException;
 
         public (ProblemDetails Problem, int StatusCode) Handle(Exception exception, IHostEnvironment env, HttpContext http)
         {
-            var statusCode = (int)HttpStatusCode.GatewayTimeout;
+            var statusCode = (int)HttpStatusCode.BadGateway;
 
-            var detail = "El servidor no respondió a tiempo.";
+            var detail = "Falló la comunicación con un servicio externo.";
 
             var problem = ProblemDetailsFactory.Create(
                 statusCode,
-                title: "Tiempo de espera agotado.",
+                title: "Error al comunicarse con el servicio externo.",
                 detail: detail,
-                type: "https://tools.ietf.org/html/rfc7231#section-6.6.5",
+                type: "https://www.rfc-editor.org/rfc/rfc7231#section-6.6.3",
                 instance: http.Request.Path
             );
 

@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using System.Net;
 using WebGESCOMPH.Middleware;
 
-namespace WebGESCOMPH.Middleware.Handlers
+namespace WebGESCOMPH.Middleware.Handlers.General
 {
     public class NullReferenceExceptionHandler : IExceptionHandler
     {

@@ -33,6 +33,8 @@ namespace WebGESCOMPH.Extensions.Modules.Core
             // JWT, CurrentUser, Cookie factory
             services.AddScoped<IToken, TokenBusiness>();
             services.AddSingleton<IAuthCookieFactory, AuthCookieFactory>();
+            // Fuente de tiempo para tokens (inyección en fábricas/gestores)
+            services.AddSingleton<IClock, SystemClock>();
             services.AddScoped<Microsoft.AspNetCore.Identity.IPasswordHasher<Entity.Domain.Models.Implements.SecurityAuthentication.User>, Microsoft.AspNetCore.Identity.PasswordHasher<Entity.Domain.Models.Implements.SecurityAuthentication.User>>();
 
             // Infraestructura común

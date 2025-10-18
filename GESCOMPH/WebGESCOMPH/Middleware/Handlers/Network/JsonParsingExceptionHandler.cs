@@ -3,7 +3,7 @@ using System.Net;
 using System.Text.Json;
 using WebGESCOMPH.Middleware;
 
-namespace WebGESCOMPH.Middleware.Handlers
+namespace WebGESCOMPH.Middleware.Handlers.Network
 {
     public class JsonParsingExceptionHandler : IExceptionHandler
     {

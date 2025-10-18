@@ -2,26 +2,26 @@
 using System.Net;
 using WebGESCOMPH.Middleware;
 
-namespace WebGESCOMPH.Middleware.Handlers
+namespace WebGESCOMPH.Middleware.Handlers.General
 {
-    public class HttpRequestExceptionHandler : IExceptionHandler
+    public class FileAccessExceptionHandler : IExceptionHandler
     {
-        public int Priority => 47;
+        public int Priority => 80;
 
         public bool CanHandle(Exception exception)
-            => exception is HttpRequestException;
+            => exception is IOException || exception is FileNotFoundException;
 
         public (ProblemDetails Problem, int StatusCode) Handle(Exception exception, IHostEnvironment env, HttpContext http)
         {
-            var statusCode = (int)HttpStatusCode.BadGateway;
+            var statusCode = (int)HttpStatusCode.InternalServerError;
 
-            var detail = "Falló la comunicación con un servicio externo.";
+            var detail = "Ocurrió un error al acceder a un archivo o recurso físico.";
 
             var problem = ProblemDetailsFactory.Create(
                 statusCode,
-                title: "Error al comunicarse con el servicio externo.",
+                title: "Error de acceso a archivo.",
                 detail: detail,
-                type: "https://www.rfc-editor.org/rfc/rfc7231#section-6.6.3",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.6.1",
                 instance: http.Request.Path
             );
 

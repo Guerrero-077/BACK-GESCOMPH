@@ -3,14 +3,14 @@ using Microsoft.EntityFrameworkCore;
 using System.Net;
 using WebGESCOMPH.Middleware;
 
-namespace WebGESCOMPH.Middleware.Handlers
+namespace WebGESCOMPH.Middleware.Handlers.Data
 {
-    public class DbConcurrencyExceptionHandler : IExceptionHandler
+    public class DbUpdateExceptionHandler : IExceptionHandler
     {
-        public int Priority => 45;
+        public int Priority => 46;
 
         public bool CanHandle(Exception exception)
-            => exception is DbUpdateConcurrencyException;
+            => exception is DbUpdateException;
 
         public (ProblemDetails Problem, int StatusCode) Handle(Exception exception, IHostEnvironment env, HttpContext http)
         {
@@ -18,8 +18,8 @@ namespace WebGESCOMPH.Middleware.Handlers
 
             var problem = ProblemDetailsFactory.Create(
                 statusCode,
-                title: "Conflicto de concurrencia.",
-                detail: "El recurso fue modificado por otro proceso. Refresca y reintenta.",
+                title: "Error de base de datos.",
+                detail: "Violación de unicidad o restricción de base de datos.",
                 type: "https://datatracker.ietf.org/doc/html/rfc7231#section-6.5.8",
                 instance: http.Request.Path
             );

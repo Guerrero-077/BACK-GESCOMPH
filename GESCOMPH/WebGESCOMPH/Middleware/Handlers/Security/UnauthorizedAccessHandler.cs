@@ -2,7 +2,7 @@
 using System.Net;
 using WebGESCOMPH.Middleware;
 
-namespace WebGESCOMPH.Middleware.Handlers
+namespace WebGESCOMPH.Middleware.Handlers.Security
 {
     public class UnauthorizedAccessHandler : IExceptionHandler
     {

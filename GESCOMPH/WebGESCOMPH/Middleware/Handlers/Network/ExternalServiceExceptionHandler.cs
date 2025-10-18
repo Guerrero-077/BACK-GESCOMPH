@@ -1,30 +1,26 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using System.Net;
+using Utilities.Exceptions;
 using WebGESCOMPH.Middleware;
 
-namespace WebGESCOMPH.Middleware.Handlers
+namespace WebGESCOMPH.Middleware.Handlers.Network
 {
-    public class ForbiddenException : Exception
+    public class ExternalServiceExceptionHandler : IExceptionHandler
     {
-        public ForbiddenException(string message) : base(message) { }
-    }
-
-    public class ForbiddenExceptionHandler : IExceptionHandler
-    {
-        public int Priority => 35;
+        public int Priority => 50;
 
         public bool CanHandle(Exception exception)
-            => exception is ForbiddenException;
+            => exception is ExternalServiceException;
 
         public (ProblemDetails Problem, int StatusCode) Handle(Exception exception, IHostEnvironment env, HttpContext http)
         {
-            var statusCode = (int)HttpStatusCode.Forbidden;
+            var statusCode = (int)HttpStatusCode.ServiceUnavailable;
 
             var problem = ProblemDetailsFactory.Create(
                 statusCode,
-                title: "Acceso prohibido.",
+                title: "Error en servicio externo.",
                 detail: exception.Message,
-                type: "https://www.rfc-editor.org/rfc/rfc7231#section-6.5.3",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.6.4",
                 instance: http.Request.Path
             );
 

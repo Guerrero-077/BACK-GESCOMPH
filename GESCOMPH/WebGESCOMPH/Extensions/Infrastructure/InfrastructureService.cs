@@ -5,6 +5,8 @@ using Entity.DTOs.Validations.SecurityAuthentication.Auth;
 using FluentValidation;
 using FluentValidation.AspNetCore;
 using WebGESCOMPH.Extensions.Presentation;
+using Microsoft.Extensions.Options;
+using Business.CustomJWT;
 using WebGESCOMPH.Extensions.RealTime;
 using WebGESCOMPH.Extensions.Validation;
 using WebGESCOMPH.RealTime;
@@ -40,6 +42,7 @@ namespace WebGESCOMPH.Extensions.Infrastructure
             services.Configure<JwtSettings>(configuration.GetSection("Jwt"));
             services.Configure<CookieSettings>(configuration.GetSection("Cookie"));
             services.AddJwtAuthentication(configuration);
+            services.AddSingleton<IValidateOptions<JwtSettings>, JwtSettingsValidator>();
 
             // DB (multi-provider)
             services.AddDatabase(configuration);
