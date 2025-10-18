@@ -16,10 +16,10 @@ namespace Data.Interfaz.IDataImplement.SecurityAuthentication
 
         Task<User?> GetByIdForUpdateAsync(int id);
 
-        // Lecturas “ricas” (detalladas) para SELECTs
+        // Lecturas (detalladas) para SELECTs
         Task<User?> GetByIdWithDetailsAsync(int id);
 
-        // Lectura mínima para autenticación (sin lógica de password aquí)
+        // Lectura mínima para autenticación
         Task<User?> GetAuthUserByEmailAsync(string email);
 
         // Opcionales según tu uso actual

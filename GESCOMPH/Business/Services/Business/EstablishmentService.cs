@@ -1,6 +1,5 @@
 using Business.Interfaces.Implements.Business;
 using Business.Repository;
-using Business.Services.Validation;
 using Data.Interfaz.IDataImplement.Business;
 using Data.Interfaz.DataBasic;
 using Entity.Domain.Models.Implements.AdministrationSystem;
@@ -12,10 +11,7 @@ using Mapster;
 using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Linq.Expressions;
 using Utilities.Exceptions;
 using Utilities.Helpers.Business;
@@ -23,8 +19,8 @@ using Utilities.Helpers.Business;
 namespace Business.Services.Business
 {
     /// <summary>
-    /// Servicio de Establecimientos con validaciones de dominio
-    /// y proyección liviana para cálculos en contratos.
+    /// Servicio de Establecimientos. Gestiona operaciones CRUD, validaciones de dominio
+    /// y cálculos financieros dependientes de parámetros del sistema (UVT).
     /// </summary>
     public sealed class EstablishmentService :
         BusinessGeneric<EstablishmentSelectDto, EstablishmentCreateDto, EstablishmentUpdateDto, Establishment>,
@@ -49,72 +45,74 @@ namespace Business.Services.Business
             _systemParamRepository = systemParamRepository;
         }
 
-        // Aquí defines la llave “única” de negocio
+        /// <summary>Define la clave de unicidad del establecimiento (Nombre).</summary>
         protected override IQueryable<Establishment>? ApplyUniquenessFilter(IQueryable<Establishment> query, Establishment candidate)
             => query.Where(e => e.Name == candidate.Name);
 
-        // ========= LISTAS =========
+        // =====================================================================
+        // CONSULTAS
+        // =====================================================================
 
-        /// <summary>Todos: activos e inactivos.</summary>
+        /// <summary>Obtiene todos los establecimientos, activos e inactivos.</summary>
         public async Task<IReadOnlyList<EstablishmentSelectDto>> GetAllAnyAsync(int? limit = null)
         {
             var list = await _repo.GetAllAsync(ActivityFilter.Any, limit);
             return list.Select(e => e.Adapt<EstablishmentSelectDto>()).ToList().AsReadOnly();
         }
 
-        /// <summary>Solo activos.</summary>
+        /// <summary>Obtiene solo los establecimientos activos.</summary>
         public async Task<IReadOnlyList<EstablishmentSelectDto>> GetAllActiveAsync(int? limit = null)
         {
             var list = await _repo.GetAllAsync(ActivityFilter.ActiveOnly, limit);
             return list.Select(e => e.Adapt<EstablishmentSelectDto>()).ToList().AsReadOnly();
         }
 
+        /// <summary>Obtiene establecimientos asociados a una plaza.</summary>
         public async Task<IReadOnlyList<EstablishmentSelectDto>> GetByPlazaIdAsync(int plazaId, bool activeOnly = false, int? limit = null)
         {
-            if (plazaId <= 0) return Array.Empty<EstablishmentSelectDto>();
+            if (plazaId <= 0)
+                return Array.Empty<EstablishmentSelectDto>();
 
             var filter = activeOnly ? ActivityFilter.ActiveOnly : ActivityFilter.Any;
             var list = await _repo.GetByPlazaIdAsync(plazaId, filter, limit);
             return list.Select(e => e.Adapt<EstablishmentSelectDto>()).ToList().AsReadOnly();
         }
-        // ========= DETALLE =========
 
+        /// <summary>Obtiene un establecimiento por Id (sin importar su estado).</summary>
         public async Task<EstablishmentSelectDto?> GetByIdAnyAsync(int id)
         {
             var e = await _repo.GetByIdAnyAsync(id);
             return e?.Adapt<EstablishmentSelectDto>();
         }
 
+        /// <summary>Obtiene un establecimiento activo por Id.</summary>
         public async Task<EstablishmentSelectDto?> GetByIdActiveAsync(int id)
         {
             var e = await _repo.GetByIdActiveAsync(id);
             return e?.Adapt<EstablishmentSelectDto>();
         }
 
-        // ========= CRUD =========
+        // =====================================================================
+        // CRUD
+        // =====================================================================
 
         public override async Task<EstablishmentSelectDto> CreateAsync(EstablishmentCreateDto dto)
         {
             try
             {
-                Validate(dto);
-
                 var entity = dto.Adapt<Establishment>();
 
-                // Calcular RentValueBase a partir del parámetro UVT vigente
                 var uvtValue = await GetParameterValueAsync("UVT", DateTime.UtcNow);
                 entity.RentValueBase = Math.Round(dto.UvtQty * uvtValue, 2, MidpointRounding.AwayFromZero);
 
                 await _repo.AddAsync(entity);
 
-                // Recarga sin filtro por Active (o usa el entity si no hace falta)
                 var created = await _repo.GetByIdAnyAsync(entity.Id) ?? entity;
-
                 return created.Adapt<EstablishmentSelectDto>();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error al crear establecimiento");
+                _logger.LogError(ex, "Error al crear establecimiento.");
                 throw new BusinessException("Error al crear el establecimiento.", ex);
             }
         }
@@ -123,25 +121,22 @@ namespace Business.Services.Business
         {
             try
             {
-                var entity = await _repo.GetByIdAnyAsync(dto.Id);
-                if (entity is null) return null;
-
-                Validate(dto);
+                var entity = await _repo.GetByIdAnyAsync(dto.Id)
+                    ?? throw new BusinessException($"No existe el establecimiento con Id {dto.Id}.");
+                
                 dto.Adapt(entity);
 
-                // Recalcular RentValueBase a partir del parámetro UVT vigente (ignora valor recibido)
                 var uvtValue = await GetParameterValueAsync("UVT", DateTime.UtcNow);
                 entity.RentValueBase = Math.Round(entity.UvtQty * uvtValue, 2, MidpointRounding.AwayFromZero);
 
                 await _repo.UpdateAsync(entity);
 
                 var reloaded = await _repo.GetByIdAnyAsync(entity.Id) ?? entity;
-
                 return reloaded.Adapt<EstablishmentSelectDto>();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error al actualizar establecimiento {Id}", dto.Id);
+                _logger.LogError(ex, "Error al actualizar establecimiento {Id}.", dto.Id);
                 throw new BusinessException("Error al actualizar el establecimiento.", ex);
             }
         }
@@ -152,17 +147,12 @@ namespace Business.Services.Business
             {
                 BusinessValidationHelper.ThrowIfZeroOrLess(id, "El ID debe ser mayor que cero.");
 
-                var hasContracts = await _context.PremisesLeaseds.AnyAsync(p => p.EstablishmentId == id && !p.IsDeleted);
-                if (hasContracts)
-                {
+                if (await _context.PremisesLeaseds.AnyAsync(p => p.EstablishmentId == id && !p.IsDeleted))
                     throw new BusinessException("No se puede eliminar un establecimiento que tiene contratos asociados.");
-                }
 
                 var entity = await _repo.GetByIdAnyAsync(id);
                 if (entity == null)
-                {
                     return false;
-                }
 
                 return await _repo.DeleteAsync(id);
             }
@@ -176,26 +166,33 @@ namespace Business.Services.Business
             }
         }
 
-        // ========= PROYECCIÓN =========
+        // =====================================================================
+        // PROYECCIONES Y OPERACIONES DE NEGOCIO
+        // =====================================================================
 
+        /// <summary>Obtiene una lista básica de establecimientos (Id, RentValue, etc.).</summary>
         public async Task<IReadOnlyList<EstablishmentBasicsDto>> GetBasicsByIdsAsync(IEnumerable<int> ids)
         {
-            var distinct = ids?.Distinct().ToList() ?? new List<int>();
-            if (distinct.Count == 0) return Array.Empty<EstablishmentBasicsDto>();
+            var distinct = ids?.Distinct().ToList() ?? new();
+            if (distinct.Count == 0)
+                return Array.Empty<EstablishmentBasicsDto>();
 
             var basics = await _repo.GetBasicsByIdsAsync(distinct);
             return basics.ToList().AsReadOnly();
         }
 
+        /// <summary>
+        /// Reserva establecimientos para un contrato (marcándolos como inactivos temporalmente).
+        /// </summary>
         public async Task<(decimal totalBaseRent, decimal totalUvt)> ReserveForContractAsync(IReadOnlyCollection<int> ids)
         {
-            var distinct = ids?.Where(id => id > 0).Distinct().ToList() ?? new List<int>();
+            var distinct = ids?.Where(id => id > 0).Distinct().ToList() ?? new();
             if (distinct.Count == 0)
                 throw new BusinessException("Debe seleccionar al menos un establecimiento.");
 
             var inactive = await _repo.GetInactiveIdsAsync(distinct);
             if (inactive.Count > 0)
-                throw new BusinessException($"Los establecimientos {string.Join(", ", inactive)} no estan disponibles (Active = false).");
+                throw new BusinessException($"Los establecimientos {string.Join(", ", inactive)} no están disponibles (Active = false).");
 
             var basics = await _repo.GetBasicsByIdsAsync(distinct);
             if (basics.Count != distinct.Count)
@@ -211,61 +208,26 @@ namespace Business.Services.Business
             return (totalBase, totalUvt);
         }
 
-        // Lista liviana para grid/cards (sin Includes pesados)
+        /// <summary>Obtiene establecimientos para mostrar en tarjetas (grid/cards).</summary>
         public async Task<IReadOnlyList<EstablishmentCardDto>> GetCardsAnyAsync()
         {
             var list = await _repo.GetCardsAsync(ActivityFilter.Any);
             return list.ToList().AsReadOnly();
         }
 
+        /// <summary>Obtiene establecimientos activos para tarjetas (grid/cards).</summary>
         public async Task<IReadOnlyList<EstablishmentCardDto>> GetCardsActiveAsync()
         {
             var list = await _repo.GetCardsAsync(ActivityFilter.ActiveOnly);
             return list.ToList().AsReadOnly();
         }
 
-        // ========= VALIDACIONES =========
+        // Validaciones de campo y normalizaciones se gestionan mediante FluentValidation
+        // en los validators de DTO correspondientes (Create/Update).
 
-        private static void Validate(EstablishmentCreateDto dto)
-        {
-            if (dto is null)
-                throw new BusinessException("Payload inválido.");
-
-            NormalizeCreate(dto);
-        }
-
-        private static void Validate(EstablishmentUpdateDto dto)
-        {
-            if (dto is null)
-                throw new BusinessException("Payload inválido.");
-
-            DomainValidation.EnsureId(dto.Id, "EstablishmentId");
-            NormalizeUpdate(dto);
-        }
-
-        private static void NormalizeCreate(EstablishmentCreateDto dto)
-        {
-            dto.Name = DomainValidation.RequireText(dto.Name, "Nombre", 100);
-            dto.Description = DomainValidation.RequireText(dto.Description, "Descripción", 500);
-            dto.UvtQty = DomainValidation.EnsureDecimalRange(dto.UvtQty, 1m, 9_999m, 2, "UvtQty");
-            dto.AreaM2 = DomainValidation.EnsureDecimalRange(dto.AreaM2, 1m, 1_000_000m, 2, "AreaM2");
-            dto.Address = DomainValidation.NormalizeAddress(dto.Address, required: false, maxLength: 150);
-            DomainValidation.EnsureId(dto.PlazaId, "PlazaId");
-        }
-
-        private static void NormalizeUpdate(EstablishmentUpdateDto dto)
-        {
-            dto.Name = DomainValidation.RequireText(dto.Name, "Nombre", 100);
-            dto.Description = DomainValidation.RequireText(dto.Description, "Descripción", 500);
-            dto.UvtQty = DomainValidation.EnsureDecimalRange(dto.UvtQty, 1m, 9_999m, 2, "UvtQty");
-            dto.AreaM2 = DomainValidation.EnsureDecimalRange(dto.AreaM2, 1m, 1_000_000m, 2, "AreaM2");
-            dto.Address = DomainValidation.NormalizeAddress(dto.Address, required: false, maxLength: 150);
-            DomainValidation.EnsureId(dto.PlazaId, "PlazaId");
-        }
-
-
-
-
+        // =====================================================================
+        // CONFIGURACIÓN DE CONSULTAS (BusinessGeneric)
+        // =====================================================================
 
         protected override Expression<Func<Establishment, string>>[] SearchableFields() =>
         [
@@ -287,7 +249,10 @@ namespace Business.Services.Business
             nameof(Establishment.Active)
         ];
 
-        // ------------------ Helpers de parámetros del sistema ------------------
+        // =====================================================================
+        // PARÁMETROS DEL SISTEMA
+        // =====================================================================
+
         private async Task<decimal> GetParameterValueAsync(string key, DateTime date)
         {
             var param = await _systemParamRepository.GetAllQueryable()
@@ -310,12 +275,9 @@ namespace Business.Services.Business
         private static bool TryParseDecimalFlexible(string raw, out decimal value)
         {
             raw = raw?.Trim() ?? string.Empty;
-            if (decimal.TryParse(raw, System.Globalization.NumberStyles.Any, CultureInfo.InvariantCulture, out value)) return true;
-            var es = CultureInfo.GetCultureInfo("es-CO");
-            if (decimal.TryParse(raw, System.Globalization.NumberStyles.Any, es, out value)) return true;
-            return decimal.TryParse(raw, System.Globalization.NumberStyles.Any, CultureInfo.CurrentCulture, out value);
+            if (decimal.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out value)) return true;
+            if (decimal.TryParse(raw, NumberStyles.Any, CultureInfo.GetCultureInfo("es-CO"), out value)) return true;
+            return decimal.TryParse(raw, NumberStyles.Any, CultureInfo.CurrentCulture, out value);
         }
-
-
     }
 }

@@ -8,7 +8,7 @@ using Entity.DTOs.Implements.SecurityAuthentication.User;
 using Entity.Infrastructure.Context;
 using MapsterMapper;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.EntityFrameworkCore; // CreateExecutionStrategy
+using Microsoft.EntityFrameworkCore;
 using System.Linq.Expressions;
 using Utilities.Exceptions;
 using Utilities.Helpers.GeneratePassword;
@@ -45,11 +45,14 @@ namespace Business.Services.SecurityAuthentication
         }
 
         // ======================================================
-        // LECTURAS
+        // =================== MÉTODOS DE LECTURA ===============
         // ======================================================
+
+        /// <summary>
+        /// Obtiene todos los usuarios con sus roles asociados.
+        /// </summary>
         public override async Task<IEnumerable<UserSelectDto>> GetAllAsync()
         {
-            // Deja que el repo optimice con AsNoTracking / Includes necesarios
             var users = await _userRepository.GetAllAsync();
             var result = new List<UserSelectDto>(capacity: users.Count());
 
@@ -59,17 +62,22 @@ namespace Business.Services.SecurityAuthentication
                 dto.Roles = await _rolUserRepository.GetRoleNamesByUserIdAsync(u.Id);
                 result.Add(dto);
             }
+
             return result;
         }
 
         // ======================================================
-        // CREAR: Persona + Usuario + Roles (con contraseña temporal)
+        // ================== CREACIÓN COMPLETA =================
         // ======================================================
-        public async Task<UserSelectDto> CreateWithPersonAndRolesAsync(UserCreateDto dto)
+
+        /// <summary>
+        /// Crea un nuevo usuario junto con su persona y roles asociados.
+        /// Genera una contraseña temporal y la envía por correo.
+        /// </summary>
+        /// <param name="dto">Datos de creación del usuario.</param>
+        public override async Task<UserSelectDto> CreateAsync(UserCreateDto dto)
         {
-            // --- Validaciones de dominio (-> 409) ---
-            if (string.IsNullOrWhiteSpace(dto.Email))
-                throw new BusinessException("El correo es requerido.");
+
 
             if (await _userRepository.ExistsByEmailAsync(dto.Email))
                 throw new BusinessException("El correo ya está registrado.");
@@ -84,46 +92,26 @@ namespace Business.Services.SecurityAuthentication
             {
                 await using var tx = await _context.Database.BeginTransactionAsync();
 
-                // 1) Mapear entidades
                 var person = _mapper.Map<Person>(dto);
-
                 var user = _mapper.Map<User>(dto);
                 user.Person = person;
 
-                // 2) Generar + hashear contraseña temporal
                 tempPassword = PasswordGenerator.Generate(12);
                 user.Password = _passwordHasher.HashPassword(user, tempPassword);
 
-                // 3) Bandera de primer inicio (si existe en tu entidad)
                 var mustChangeProp = typeof(User).GetProperty("MustChangePassword");
-                if (mustChangeProp is not null)
-                    mustChangeProp.SetValue(user, true);
+                mustChangeProp?.SetValue(user, true);
 
-                // 4) Guardar usuario
                 await _userRepository.AddAsync(user);
 
-                // 5) Reemplazar roles (idempotente)
                 var roleIds = (dto.RoleIds ?? Array.Empty<int>()).Where(x => x > 0).Distinct().ToList();
                 await _rolUserRepository.ReplaceUserRolesAsync(user.Id, roleIds);
 
                 await tx.CommitAsync();
             });
 
-            // 6) Side-effect fuera del bloque retriable (evita duplicados si hay reintentos)
-            try
-            {
-                var fullName = $"{dto.FirstName} {dto.LastName}".Trim();
-                if (!string.IsNullOrWhiteSpace(dto.Email) && !string.IsNullOrWhiteSpace(tempPassword))
-                {
-                    await _emailService.SendTemporaryPasswordAsync(dto.Email, fullName, tempPassword!);
-                }
-            }
-            catch
-            {
-                // Loguea y no interrumpas la operación de negocio por fallo de email.
-            }
+            await SendTemporaryPasswordAsync(dto.Email, $"{dto.FirstName} {dto.LastName}".Trim(), tempPassword!);
 
-            // 7) Respuesta consistente (lectura detallada, readonly)
             var userId = await _userRepository.GetIdByEmailAsync(dto.Email)
                          ?? throw new Exception("No se pudo recuperar el ID del usuario tras el registro.");
 
@@ -136,19 +124,19 @@ namespace Business.Services.SecurityAuthentication
         }
 
         // ======================================================
-        // ACTUALIZAR: Usuario + Persona + Roles (sin tocar Document)
+        // =================== ACTUALIZACIÓN ====================
         // ======================================================
-        public async Task<UserSelectDto> UpdateWithPersonAndRolesAsync(UserUpdateDto dto)
-        {
-            // --- Reglas de negocio (→ 409) ---
-            if (string.IsNullOrWhiteSpace(dto.Email))
-                throw new BusinessException("El correo es requerido.");
 
-            // Cargar User + Person (tracked) para actualizar sin crear una nueva Person
+        /// <summary>
+        /// Actualiza un usuario junto con sus datos personales y roles asociados.
+        /// </summary>
+        /// <param name="dto">Datos de actualización del usuario.</param>
+        public override async Task<UserSelectDto> UpdateAsync(UserUpdateDto dto)
+        {
+
             var user = await _userRepository.GetByIdForUpdateAsync(dto.Id)
                        ?? throw new BusinessException("Usuario no encontrado.");
 
-            // Unicidad de email excluyendo el propio Id
             if (await _userRepository.ExistsByEmailExcludingIdAsync(dto.Id, dto.Email))
                 throw new BusinessException("El correo ya está registrado por otro usuario.");
 
@@ -158,29 +146,23 @@ namespace Business.Services.SecurityAuthentication
             {
                 await using var tx = await _context.Database.BeginTransactionAsync();
 
-                // 1) Mapear cambios en User
                 _mapper.Map(dto, user);
 
-                // 2) Mapear cambios en Person (FirstName, LastName, Phone, Address, CityId, etc.)
                 if (user.Person is null)
                     throw new BusinessException("El usuario no tiene una persona asociada.");
 
                 _mapper.Map(dto, user.Person);
 
-                // Airbag: jamás persistir cambios en Person.Document desde este flujo
                 _context.Entry(user.Person).Property(p => p.Document).IsModified = false;
 
-                // 3) Persistir cambios
                 await _userRepository.UpdateAsync(user);
 
-                // 4) Reemplazar roles (idempotente)
                 var roleIds = (dto.RoleIds ?? Array.Empty<int>()).Where(x => x > 0).Distinct().ToList();
                 await _rolUserRepository.ReplaceUserRolesAsync(user.Id, roleIds);
 
                 await tx.CommitAsync();
             });
 
-            // 5) Respuesta consistente (lectura rica, readonly)
             var updated = await _userRepository.GetByIdWithDetailsAsync(user.Id)
                           ?? throw new Exception("No se pudo recuperar el usuario actualizado.");
 
@@ -189,35 +171,42 @@ namespace Business.Services.SecurityAuthentication
             return result;
         }
 
+        // ======================================================
+        // =========== CREACIÓN CON PERSONA EXISTENTE ===========
+        // ======================================================
+
+        /// <summary>
+        /// Garantiza que exista un usuario asociado a una persona.
+        /// Si no existe, lo crea con una contraseña temporal.
+        /// </summary>
+        /// <param name="personId">Identificador de la persona.</param>
+        /// <param name="email">Correo electrónico del usuario.</param>
         public async Task<(int userId, bool created, string? tempPassword)> EnsureUserForPersonAsync(int personId, string email)
         {
             if (personId <= 0)
-                throw new BusinessException("PersonId invalido.");
+                throw new BusinessException("PersonId inválido.");
 
             if (string.IsNullOrWhiteSpace(email))
                 throw new BusinessException("El correo es requerido.");
 
             var normalizedEmail = email.Trim();
-
             var existing = await _userRepository.GetByPersonIdAsync(personId);
             if (existing is not null)
                 return (existing.Id, false, null);
 
             if (await _userRepository.ExistsByEmailAsync(normalizedEmail))
-                throw new BusinessException("El correo ya esta registrado.");
+                throw new BusinessException("El correo ya está registrado.");
 
             if (await _personRepository.GetByIdAsync(personId) is null)
                 throw new BusinessException("Persona no encontrada para crear el usuario.");
 
             var tempPassword = PasswordGenerator.Generate(12);
-
             var user = new User
             {
                 Email = normalizedEmail,
-                PersonId = personId
+                PersonId = personId,
+                Password = _passwordHasher.HashPassword(new User(), tempPassword)
             };
-
-            user.Password = _passwordHasher.HashPassword(user, tempPassword);
 
             await _userRepository.AddAsync(user);
             await _rolUserRepository.AsignateRolDefault(user);
@@ -225,7 +214,29 @@ namespace Business.Services.SecurityAuthentication
             return (user.Id, true, tempPassword);
         }
 
+        // ======================================================
+        // =============== MÉTODOS DE SOPORTE ===================
+        // ======================================================
 
+        /// <summary>
+        /// Envía la contraseña temporal por correo electrónico.
+        /// </summary>
+        private async Task SendTemporaryPasswordAsync(string email, string fullName, string tempPassword)
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(email) && !string.IsNullOrWhiteSpace(tempPassword))
+                    await _emailService.SendTemporaryPasswordAsync(email, fullName, tempPassword);
+            }
+            catch
+            {
+                // No se interrumpe el flujo principal si el envío de correo falla.
+            }
+        }
+
+        /// <summary>
+        /// Define los campos habilitados para búsqueda textual.
+        /// </summary>
         protected override Expression<Func<User, string?>>[] SearchableFields() =>
         [
             x => x.Email,
@@ -237,31 +248,40 @@ namespace Business.Services.SecurityAuthentication
             x => x.Person.City.Name
         ];
 
+        /// <summary>
+        /// Define los campos permitidos para ordenamiento.
+        /// </summary>
         protected override string[] SortableFields() => new[]
         {
-            nameof(User.Email),                // Usuario
-            "Person.Document",               // N° Documento
-            "Person.Phone",                  // Teléfono
-            "Person.Address",                // Dirección
-            "Person.City.Name",              // Ciudad
-            nameof(User.Active),               // Estado
+            nameof(User.Email),
+            "Person.Document",
+            "Person.Phone",
+            "Person.Address",
+            "Person.City.Name",
+            nameof(User.Active),
             nameof(User.CreatedAt),
             nameof(User.Id)
         };
 
+        /// <summary>
+        /// Define el mapeo de campos ordenables para expresiones de LINQ dinámico.
+        /// </summary>
         protected override IDictionary<string, LambdaExpression> SortMap()
             => new Dictionary<string, LambdaExpression>(StringComparer.OrdinalIgnoreCase)
             {
-                [nameof(User.Email)]          = (Expression<Func<User, string>>)(u => u.Email),
-                ["Person.Document"]          = (Expression<Func<User, string?>>)(u => u.Person.Document),
-                ["Person.Phone"]             = (Expression<Func<User, string?>>)(u => u.Person.Phone),
-                ["Person.Address"]           = (Expression<Func<User, string?>>)(u => u.Person.Address),
-                ["Person.City.Name"]         = (Expression<Func<User, string>>)(u => u.Person.City.Name),
-                [nameof(User.Active)]         = (Expression<Func<User, bool>>)(u => u.Active),
-                [nameof(User.CreatedAt)]      = (Expression<Func<User, DateTime>>)(u => u.CreatedAt),
-                [nameof(User.Id)]             = (Expression<Func<User, int>>)(u => u.Id),
+                [nameof(User.Email)] = (Expression<Func<User, string>>)(u => u.Email),
+                ["Person.Document"] = (Expression<Func<User, string?>>)(u => u.Person.Document),
+                ["Person.Phone"] = (Expression<Func<User, string?>>)(u => u.Person.Phone),
+                ["Person.Address"] = (Expression<Func<User, string?>>)(u => u.Person.Address),
+                ["Person.City.Name"] = (Expression<Func<User, string>>)(u => u.Person.City.Name),
+                [nameof(User.Active)] = (Expression<Func<User, bool>>)(u => u.Active),
+                [nameof(User.CreatedAt)] = (Expression<Func<User, DateTime>>)(u => u.CreatedAt),
+                [nameof(User.Id)] = (Expression<Func<User, int>>)(u => u.Id),
             };
 
+        /// <summary>
+        /// Define los filtros disponibles en consultas dinámicas.
+        /// </summary>
         protected override IDictionary<string, Func<string, Expression<Func<User, bool>>>> AllowedFilters() =>
             new Dictionary<string, Func<string, Expression<Func<User, bool>>>>(StringComparer.OrdinalIgnoreCase)
             {

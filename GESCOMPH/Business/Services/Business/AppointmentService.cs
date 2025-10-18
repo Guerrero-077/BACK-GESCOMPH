@@ -47,6 +47,12 @@ namespace Business.Services.Business
             _logger = logger;
         }
 
+        /// <summary>
+        /// Crea una cita nueva, gestionando automáticamente la persona y el usuario asociado.
+        /// También envía las credenciales por correo si se crea un usuario nuevo.
+        /// </summary>
+        /// <param name="dto">Datos de creación de la cita.</param>
+        /// <returns>Objeto <see cref="AppointmentSelectDto"/> con la cita creada.</returns>
         public override async Task<AppointmentSelectDto> CreateAsync(AppointmentCreateDto dto)
         {
             BusinessValidationHelper.ThrowIfNull(dto, "El DTO no puede ser nulo.");
@@ -59,15 +65,12 @@ namespace Business.Services.Business
             {
                 await using var tx = await _context.Database.BeginTransactionAsync();
 
-                // 1) Persona
                 var personDto = _mapper.Map<PersonDto>(dto);
                 var person = await _personService.GetOrCreateByDocumentAsync(personDto);
 
-                // 2) Usuario
                 var (userId, created, password) = await _userService.EnsureUserForPersonAsync(person.Id, dto.Email);
                 tempPassword = password;
 
-                // 3) Cita
                 var appointment = _mapper.Map<Appointment>(dto);
                 appointment.PersonId = person.Id;
                 appointment.Active = true;
@@ -77,7 +80,6 @@ namespace Business.Services.Business
                 await tx.CommitAsync();
             });
 
-            // 4) Enviar correo (fuera de la transacción)
             if (!string.IsNullOrWhiteSpace(dto.Email) && !string.IsNullOrWhiteSpace(tempPassword))
             {
                 try
@@ -99,6 +101,10 @@ namespace Business.Services.Business
             return _mapper.Map<AppointmentSelectDto>(createdAppointment!);
         }
 
+        /// <summary>
+        /// Define los campos de la entidad que son buscables mediante operaciones de texto.
+        /// </summary>
+        /// <returns>Expresiones que representan los campos buscables.</returns>
         protected override Expression<Func<Appointment, string>>[] SearchableFields() =>
         [
             a => a.Description!,
@@ -108,6 +114,10 @@ namespace Business.Services.Business
             a => a.Establishment.Name!
         ];
 
+        /// <summary>
+        /// Define los campos que se pueden utilizar para ordenar los resultados de las consultas.
+        /// </summary>
+        /// <returns>Arreglo de nombres de campos ordenables.</returns>
         protected override string[] SortableFields() => new[]
         {
             nameof(Appointment.Description),
@@ -120,6 +130,10 @@ namespace Business.Services.Business
             nameof(Appointment.Active)
         };
 
+        /// <summary>
+        /// Define los filtros permitidos para la búsqueda y consulta de citas.
+        /// </summary>
+        /// <returns>Diccionario de filtros válidos y sus expresiones asociadas.</returns>
         protected override IDictionary<string, Func<string, Expression<Func<Appointment, bool>>>> AllowedFilters() =>
             new Dictionary<string, Func<string, Expression<Func<Appointment, bool>>>>(StringComparer.OrdinalIgnoreCase)
             {

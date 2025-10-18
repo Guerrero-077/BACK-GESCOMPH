@@ -30,7 +30,7 @@ namespace WebGESCOMPH.Controllers.Module.SecurityAuthentication
         [ProducesResponseType(StatusCodes.Status409Conflict)]
         public override async Task<ActionResult<UserSelectDto>> Post([FromBody] UserCreateDto dto)
         {
-            var created = await _userService.CreateWithPersonAndRolesAsync(dto);
+            var created = await _userService.CreateAsync(dto);
             return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
         }
 
@@ -45,7 +45,7 @@ namespace WebGESCOMPH.Controllers.Module.SecurityAuthentication
             // Si tu DTO es 'record' con init, puedes usar: dto = dto with { Id = id };
             dto.Id = id; // para clase con set
 
-            var updated = await _userService.UpdateWithPersonAndRolesAsync(dto);
+            var updated = await _userService.UpdateAsync(dto);
             return updated is null ? NotFound() : Ok(updated);
         }
 

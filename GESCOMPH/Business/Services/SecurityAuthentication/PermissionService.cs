@@ -8,20 +8,35 @@ using System.Linq.Expressions;
 
 namespace Business.Services.SecurityAuthentication
 {
-    public class PermissionService(IDataGeneric<Permission> data, IMapper mapper)
-        : BusinessGeneric<PermissionSelectDto, PermissionCreateDto, PermissionUpdateDto, Permission>(data, mapper),
-          IPermissionService
+    /// <summary>
+    /// Servicio de gestión de permisos del sistema. 
+    /// Hereda de <see cref="BusinessGeneric{TSelectDto, TCreateDto, TUpdateDto, TEntity}"/> 
+    /// para proveer operaciones CRUD con lógica de negocio adicional.
+    /// </summary>
+    public class PermissionService : BusinessGeneric<PermissionSelectDto, PermissionCreateDto, PermissionUpdateDto, Permission>, IPermissionService
     {
-        // Aquí defines la llave “única” de negocio
+        public PermissionService(IDataGeneric<Permission> data, IMapper mapper)
+            : base(data, mapper) { }
+
+        /// <summary>
+        /// Define la condición de unicidad de negocio para la entidad Permission.
+        /// Previene la creación o actualización de registros duplicados según el nombre del permiso.
+        /// </summary>
         protected override IQueryable<Permission>? ApplyUniquenessFilter(IQueryable<Permission> query, Permission candidate)
             => query.Where(p => p.Name == candidate.Name);
 
+        /// <summary>
+        /// Define los campos sobre los cuales se permite la búsqueda textual (filtros de texto libre).
+        /// </summary>
         protected override Expression<Func<Permission, string?>>[] SearchableFields() =>
         [
             p => p.Name,
             p => p.Description
         ];
 
+        /// <summary>
+        /// Define los campos permitidos para ordenamiento dinámico en las consultas.
+        /// </summary>
         protected override string[] SortableFields() =>
         [
             nameof(Permission.Name),
@@ -31,6 +46,10 @@ namespace Business.Services.SecurityAuthentication
             nameof(Permission.Active)
         ];
 
+        /// <summary>
+        /// Define los filtros exactos permitidos en consultas parametrizadas.
+        /// Las claves del diccionario representan el nombre del campo y las expresiones su condición.
+        /// </summary>
         protected override IDictionary<string, Func<string, Expression<Func<Permission, bool>>>> AllowedFilters() =>
             new Dictionary<string, Func<string, Expression<Func<Permission, bool>>>>(StringComparer.OrdinalIgnoreCase)
             {

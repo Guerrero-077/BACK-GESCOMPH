@@ -7,13 +7,17 @@ using Entity.Domain.Models.Implements.Business;
 using Entity.DTOs.Implements.Business.ObligationMonth;
 using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
-using System.Collections.Generic;
 using System.Globalization;
 using System.Linq.Expressions;
 using Utilities.Exceptions;
 
 namespace Business.Services.Business
 {
+    /// <summary>
+    /// Servicio de negocio encargado de gestionar las obligaciones mensuales
+    /// asociadas a contratos, incluyendo generación automática, cálculo de montos
+    /// y validación de parámetros financieros (UVT, IVA).
+    /// </summary>
     public class ObligationMonthService
         : BusinessGeneric<ObligationMonthSelectDto, ObligationMonthDto, ObligationMonthUpdateDto, ObligationMonth>,
           IObligationMonthService
@@ -22,17 +26,25 @@ namespace Business.Services.Business
         private readonly IContractRepository _contractRepository;
         private readonly IDataGeneric<SystemParameter> _systemParamRepository;
 
+        /// <summary>
+        /// Inicializa una nueva instancia del servicio de obligaciones mensuales.
+        /// </summary>
         public ObligationMonthService(
             IObligationMonthRepository obligationRepository,
             IContractRepository contractRepository,
             IDataGeneric<SystemParameter> systemParamRepository,
-            IMapper mapper) : base(obligationRepository, mapper)
+            IMapper mapper)
+            : base(obligationRepository, mapper)
         {
             _obligationRepository = obligationRepository;
             _contractRepository = contractRepository;
             _systemParamRepository = systemParamRepository;
         }
 
+        /// <summary>
+        /// Genera las obligaciones mensuales para todos los contratos activos
+        /// correspondientes al año y mes indicados.
+        /// </summary>
         public async Task GenerateMonthlyAsync(int year, int month)
         {
             var (monthStart, monthEnd, dueDate) = GetPeriodDates(year, month);
@@ -47,6 +59,10 @@ namespace Business.Services.Business
                 await UpsertObligationAsync(contract, monthStart, uvtValue, vatRate);
         }
 
+        /// <summary>
+        /// Genera la obligación mensual para un contrato específico, validando que
+        /// el contrato esté vigente durante el período.
+        /// </summary>
         public async Task GenerateForContractMonthAsync(int contractId, int year, int month)
         {
             var contract = await _contractRepository.GetByIdAsync(contractId)
@@ -63,10 +79,13 @@ namespace Business.Services.Business
             await UpsertObligationAsync(contract, monthStart, uvtValue, vatRate);
         }
 
+        /// <summary>
+        /// Retorna todas las obligaciones mensuales asociadas a un contrato.
+        /// </summary>
         public async Task<IReadOnlyList<ObligationMonthSelectDto>> GetByContractAsync(int contractId)
         {
             if (contractId <= 0)
-                throw new BusinessException("contractId invalido.");
+                throw new BusinessException("contractId inválido.");
 
             var list = await _obligationRepository.GetByContractQueryable(contractId)
                 .AsNoTracking()
@@ -75,6 +94,9 @@ namespace Business.Services.Business
             return _mapper.Map<List<ObligationMonthSelectDto>>(list).AsReadOnly();
         }
 
+        /// <summary>
+        /// Marca una obligación mensual como pagada, asignando la fecha actual y bloqueando futuras modificaciones.
+        /// </summary>
         public async Task MarkAsPaidAsync(int id)
         {
             var existing = await _obligationRepository.GetByIdAsync(id)
@@ -87,8 +109,12 @@ namespace Business.Services.Business
             await _obligationRepository.UpdateAsync(existing);
         }
 
-        // ------------------ Helpers internos ------------------
+        // ------------------ Métodos internos de negocio ------------------
 
+        /// <summary>
+        /// Crea o actualiza (Upsert) una obligación mensual para un contrato determinado.
+        /// Si ya existe y está bloqueada, se omite.
+        /// </summary>
         private async Task UpsertObligationAsync(Contract contract, DateTime periodDate, decimal uvtValue, decimal vatRate)
         {
             var existing = await _obligationRepository
@@ -135,6 +161,9 @@ namespace Business.Services.Business
             }
         }
 
+        /// <summary>
+        /// Calcula las fechas de inicio, fin y vencimiento de un período mensual.
+        /// </summary>
         private (DateTime MonthStart, DateTime MonthEnd, DateTime DueDate) GetPeriodDates(int year, int month)
         {
             var monthStart = new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -143,6 +172,9 @@ namespace Business.Services.Business
             return (monthStart, monthEnd, dueDate);
         }
 
+        /// <summary>
+        /// Calcula los montos base, IVA y total de una obligación mensual.
+        /// </summary>
         private (decimal BaseAmount, decimal VatAmount, decimal TotalAmount) CalculateAmounts(Contract contract, decimal uvtValue, decimal vatRate)
         {
             decimal baseAmount = contract.TotalBaseRentAgreed > 0m
@@ -153,6 +185,10 @@ namespace Business.Services.Business
             return (baseAmount, vatAmount, baseAmount + vatAmount);
         }
 
+        /// <summary>
+        /// Obtiene el valor vigente de un parámetro del sistema (UVT, IVA, etc.)
+        /// según una fecha específica.
+        /// </summary>
         private async Task<decimal> GetParameterValueAsync(string key, DateTime date)
         {
             var param = await _systemParamRepository.GetAllQueryable()
@@ -179,6 +215,9 @@ namespace Business.Services.Business
             return value;
         }
 
+        /// <summary>
+        /// Intenta convertir un valor string a decimal considerando formato local, invariante y actual.
+        /// </summary>
         private static bool TryParseDecimalFlexible(string raw, out decimal value)
         {
             raw = raw?.Trim() ?? "";
@@ -188,22 +227,33 @@ namespace Business.Services.Business
             return decimal.TryParse(raw, NumberStyles.Any, CultureInfo.CurrentCulture, out value);
         }
 
+        /// <summary>
+        /// Retorna el total de obligaciones pagadas en una fecha específica.
+        /// </summary>
         public async Task<decimal> GetTotalObligationsPaidByDayAsync(DateTime date)
         {
             return await _obligationRepository.GetTotalObligationsPaidByDayAsync(date);
         }
 
+        /// <summary>
+        /// Retorna el total de obligaciones pagadas en un mes y año específicos.
+        /// </summary>
         public async Task<decimal> GetTotalObligationsPaidByMonthAsync(int year, int month)
         {
             return await _obligationRepository.GetTotalObligationsPaidByMonthAsync(year, month);
         }
 
+        /// <summary>
+        /// Campos habilitados para búsqueda textual.
+        /// </summary>
         protected override Expression<Func<ObligationMonth, string>>[] SearchableFields() =>
         [
             e => e.Status
         ];
 
-
+        /// <summary>
+        /// Campos habilitados para ordenamiento dinámico.
+        /// </summary>
         protected override string[] SortableFields() =>
         [
             nameof(ObligationMonth.Year),
@@ -219,17 +269,19 @@ namespace Business.Services.Business
             nameof(ObligationMonth.Id)
         ];
 
+        /// <summary>
+        /// Filtros permitidos para consultas mediante query params.
+        /// </summary>
         protected override IDictionary<string, Func<string, Expression<Func<ObligationMonth, bool>>>> AllowedFilters() =>
-        new Dictionary<string, Func<string, Expression<Func<ObligationMonth, bool>>>>(StringComparer.OrdinalIgnoreCase)
-        {
-            [nameof(ObligationMonth.ContractId)] = val => e => e.ContractId == int.Parse(val),
-            [nameof(ObligationMonth.Year)] = val => e => e.Year == int.Parse(val),
-            [nameof(ObligationMonth.Month)] = val => e => e.Month == int.Parse(val),
-            [nameof(ObligationMonth.Status)] = val => e => e.Status == val,
-            [nameof(ObligationMonth.Locked)] = val => e => e.Locked == bool.Parse(val),
-            [nameof(ObligationMonth.Active)] = val => e => e.Active == bool.Parse(val),
-            [nameof(ObligationMonth.DueDate)] = val => e => e.DueDate.Date == DateTime.Parse(val).Date
-        };
-
+            new Dictionary<string, Func<string, Expression<Func<ObligationMonth, bool>>>>(StringComparer.OrdinalIgnoreCase)
+            {
+                [nameof(ObligationMonth.ContractId)] = val => e => e.ContractId == int.Parse(val),
+                [nameof(ObligationMonth.Year)] = val => e => e.Year == int.Parse(val),
+                [nameof(ObligationMonth.Month)] = val => e => e.Month == int.Parse(val),
+                [nameof(ObligationMonth.Status)] = val => e => e.Status == val,
+                [nameof(ObligationMonth.Locked)] = val => e => e.Locked == bool.Parse(val),
+                [nameof(ObligationMonth.Active)] = val => e => e.Active == bool.Parse(val),
+                [nameof(ObligationMonth.DueDate)] = val => e => e.DueDate.Date == DateTime.Parse(val).Date
+            };
     }
 }

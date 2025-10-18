@@ -8,79 +8,67 @@ using Templates.Templates;
 namespace Business.Services.Utilities.PDF
 {
     /// <summary>
-    /// Generador de PDF basado en Playwright con reutilización de Browser.
-    /// - Reutiliza IPlaywright e IBrowser (lazy, thread-safe)
-    /// - Crea IBrowserContext e IPage por request (thread-safe)
-    /// - Optimiza reemplazos y tiempos de espera
+    /// Servicio para generar contratos PDF usando Playwright.
+    /// Optimizado para reutilizar instancias globales de navegador y mejorar rendimiento.
     /// </summary>
     public class ContractPdfService : IContractPdfGeneratorService
     {
-        // Lazy singletons para evitar condiciones de carrera en arranque
         private static readonly SemaphoreSlim _initLock = new(1, 1);
         private static IPlaywright? _playwright;
         private static IBrowser? _browser;
 
-        // Marcador simple en plantilla para cláusulas
         private const string ClausesPlaceholder = "{{CLAUSES}}";
 
+        /// <summary>
+        /// Genera un contrato PDF a partir de la información del contrato.
+        /// Reutiliza el navegador, renderiza la plantilla HTML y exporta a PDF.
+        /// </summary>
+        /// <param name="contract">Contrato con datos de arrendatario, cláusulas, montos y fechas.</param>
+        /// <returns>Archivo PDF en bytes.</returns>
         public async Task<byte[]> GeneratePdfAsync(ContractSelectDto contract)
         {
-            // 1) Preparar HTML a partir de plantilla
             var template = ContractTemplate.Html;
             var html = BuildHtml(template, contract);
 
-            // 2) Asegurar que Playwright y Browser están inicializados una sola vez
             await EnsureBrowserAsync();
 
-            // 3) Usar un contexto/página por request (thread-safe)
-            //    Contexto limpio = sin fugas de estado/cookies/almacenamiento.
             var context = await _browser!.NewContextAsync(new()
             {
-                // Viewport null => tamaño "fit to page" para PDF,
-                // no imprescindible, pero ayuda a evitar reflow extraño.
                 ViewportSize = null,
-                JavaScriptEnabled = false, // desactiva JS para acelerar si no se usa
+                JavaScriptEnabled = false,
                 BypassCSP = true
             });
 
             try
             {
-                // Bloquear solo recursos externos http/https (permitir about:blank, data:)
                 await context.RouteAsync("**/*", route =>
                 {
                     var url = route.Request.Url;
                     if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
                         url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-                    {
                         return route.AbortAsync();
-                    }
+
                     return route.ContinueAsync();
                 });
 
                 var page = await context.NewPageAsync();
-
-                // Emular media "print" para respetar estilos de impresión
                 await page.EmulateMediaAsync(new() { Media = Media.Print });
 
-                // 4) Cargar HTML y esperar a estar ocioso en red.
-                //    BaseURL opcional si usas rutas relativas a recursos (css/img).
                 await page.SetContentAsync(
                     html,
                     new PageSetContentOptions
                     {
-                        // Para contenido estático embebido, DOMContentLoaded es suficiente
                         WaitUntil = WaitUntilState.DOMContentLoaded,
-                        Timeout = 2_000
+                        Timeout = 2000
                     });
 
-                // 5) Exportar PDF
                 var pdfBytes = await page.PdfAsync(new PagePdfOptions
                 {
                     Format = "Letter",
                     PrintBackground = true,
-                    PreferCSSPageSize = true, // respeta @page css size si lo defines
+                    PreferCSSPageSize = true,
                     DisplayHeaderFooter = true,
-                    HeaderTemplate = "<div></div>", // vacío pero necesario si se activa
+                    HeaderTemplate = "<div></div>",
                     FooterTemplate =
                         "<div style=\"font-size:10px;width:100%;text-align:center;color:#555;\">" +
                         "Página <span class=\"pageNumber\"></span> de <span class=\"totalPages\"></span>" +
@@ -102,13 +90,14 @@ namespace Business.Services.Utilities.PDF
             }
         }
 
-        public Task WarmupAsync()
-        {
-            return EnsureBrowserAsync();
-        }
+        /// <summary>
+        /// Precalienta Playwright y el navegador para reducir la latencia en la primera generación de PDF.
+        /// </summary>
+        public Task WarmupAsync() => EnsureBrowserAsync();
 
         /// <summary>
-        /// Inicializa IPlaywright e IBrowser una sola vez. Thread-safe y tolerante a caídas.
+        /// Inicializa Playwright y el navegador Chromium si no existen aún.
+        /// Implementa control de concurrencia para evitar inicializaciones múltiples.
         /// </summary>
         private static async Task EnsureBrowserAsync()
         {
@@ -120,14 +109,11 @@ namespace Business.Services.Utilities.PDF
                 if (_browser is not null) return;
 
                 _playwright ??= await Playwright.CreateAsync();
-
-                // Flags útiles en contenedores Linux (ajústalos por entorno)
                 var launchOptions = new BrowserTypeLaunchOptions
                 {
                     Headless = true,
                     Args = new[]
                     {
-                        // Comenta si NO estás en contenedor endurecido
                         "--no-sandbox",
                         "--disable-dev-shm-usage",
                         "--disable-gpu",
@@ -140,7 +126,6 @@ namespace Business.Services.Utilities.PDF
             }
             catch
             {
-                // Si algo falló, forzar reintento en la próxima llamada
                 _browser = null;
                 _playwright = null;
                 throw;
@@ -152,14 +137,13 @@ namespace Business.Services.Utilities.PDF
         }
 
         /// <summary>
-        /// Construye el HTML final: reemplazos directos + renderizado de cláusulas.
-        /// Evita usos innecesarios de Regex salvo para el bloque foreach.
+        /// Construye el HTML del contrato reemplazando placeholders de la plantilla.
+        /// Incluye renderizado de cláusulas y codificación HTML básica.
         /// </summary>
         private static string BuildHtml(string template, ContractSelectDto c)
         {
             var sb = new StringBuilder(template);
 
-            // Reemplazos simples (usa valores seguros)
             sb.Replace("@Model.FullName", HtmlEncode(c.FullName));
             sb.Replace("@Model.Document", HtmlEncode(c.Document));
             sb.Replace("@Model.Phone", HtmlEncode(c.Phone));
@@ -167,32 +151,25 @@ namespace Business.Services.Utilities.PDF
             sb.Replace("@Model.StartDate.ToString(\"dd/MM/yyyy\")", c.StartDate.ToString("dd/MM/yyyy"));
             sb.Replace("@Model.EndDate.ToString(\"dd/MM/yyyy\")", c.EndDate.ToString("dd/MM/yyyy"));
 
-            // Datos derivados del contrato
             sb.Replace("@Model.ContractNumber", c.Id.ToString());
             sb.Replace("@Model.ContractYear", c.StartDate.Year.ToString());
 
-            // Cálculo aproximado de duración en meses (diferencia año-mes)
             var durationMonths = ((c.EndDate.Year - c.StartDate.Year) * 12) + (c.EndDate.Month - c.StartDate.Month);
-            if (durationMonths < 0) durationMonths = 0; // seguridad
+            if (durationMonths < 0) durationMonths = 0;
             sb.Replace("@Model.DurationMonths", durationMonths.ToString());
 
-            // Montos: total base pactado y cantidad UVT pactada
             var esCO = new CultureInfo("es-CO");
             string money = c.TotalBaseRentAgreed.ToString("N0", esCO);
             string uvtQty = c.TotalUvtQtyAgreed.ToString("0.##", CultureInfo.InvariantCulture);
             sb.Replace("@Model.MonthlyRentAmount", money);
-            // Si no hay conversión a letras, usar mismo valor numérico para evitar placeholders sin reemplazar
-            // Monto en letras (ES). Si falla, usar numérico como respaldo.
+
             string moneyWords;
             try { moneyWords = NumberToSpanishWords(c.TotalBaseRentAgreed); }
             catch { moneyWords = money; }
             sb.Replace("@Model.MonthlyRentAmountWords", moneyWords);
             sb.Replace("@Model.UVTValue", uvtQty);
 
-            // Dirección del arrendatario no está en el DTO; evitar dejar el placeholder sin reemplazo
-            // Dirección del arrendatario
             sb.Replace("@Model.Address", HtmlEncode(c.Address ?? string.Empty));
-
 
             var p = c.PremisesLeased?.FirstOrDefault();
             if (p != null)
@@ -203,7 +180,6 @@ namespace Business.Services.Utilities.PDF
                 sb.Replace("@Model.PremisesLeased[0].PlazaName", HtmlEncode(p.PlazaName));
             }
 
-            // Renderizar cláusulas
             var clausesHtml = new StringBuilder();
             if (c.Clauses is not null)
             {
@@ -214,18 +190,16 @@ namespace Business.Services.Utilities.PDF
                 }
             }
 
-            // Reemplazo directo del placeholder de cláusulas
             sb.Replace(ClausesPlaceholder, clausesHtml.ToString());
 
-            // Logo opcional: intentar cargar desde wwwroot/public
             var logoB64 = TryLoadLogoBase64();
             sb.Replace("{{LOGO_BASE64}}", logoB64 ?? string.Empty);
+
             return sb.ToString();
         }
 
         /// <summary>
-        /// Muy básico para evitar romper el HTML con datos de usuario.
-        /// (Si ya controlas el origen, puedes omitirlo.)
+        /// Codifica texto para uso seguro en HTML (escape de caracteres especiales).
         /// </summary>
         private static string HtmlEncode(string? value)
         {
@@ -238,6 +212,9 @@ namespace Business.Services.Utilities.PDF
                 .Replace("'", "&#39;");
         }
 
+        /// <summary>
+        /// Busca y convierte el logo en Base64 desde las rutas conocidas.
+        /// </summary>
         private static string? TryLoadLogoBase64()
         {
             try
@@ -265,12 +242,14 @@ namespace Business.Services.Utilities.PDF
             }
             catch
             {
-                // ignore: logo es opcional
+                // El logo es opcional, se ignora el error.
             }
             return null;
         }
 
-        // Conversión simple de números a palabras en español (enteros, hasta miles de millones)
+        /// <summary>
+        /// Convierte un número decimal a su representación en palabras en español.
+        /// </summary>
         private static string NumberToSpanishWords(decimal value)
         {
             var n = (long)Math.Round(value, 0, MidpointRounding.AwayFromZero);
@@ -297,6 +276,9 @@ namespace Business.Services.Utilities.PDF
             return string.Join(" ", parts).Trim().Replace("  ", " ");
         }
 
+        /// <summary>
+        /// Convierte números de tres dígitos a texto en español (100-999).
+        /// </summary>
         private static string ThreeDigitsToSpanish(long n)
         {
             string[] unidades = { "", "UN", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE", "DIEZ", "ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE", "DIECISÉIS", "DIECISIETE", "DIECIOCHO", "DIECINUEVE" };
@@ -334,12 +316,13 @@ namespace Business.Services.Utilities.PDF
             return sb.ToString().Trim();
         }
 
-        private static string ToVeinti(string unidad)
-        {
-            // Maneja contracciones habituales: VEINTIÚN antes de sustantivo, aquí dejamos VEINTIUNO genérico
-            return unidad.ToLower() switch
+        /// <summary>
+        /// Ajusta terminaciones en palabras del rango "veinti..." (ej. veintiuno, veintidós, etc.)
+        /// </summary>
+        private static string ToVeinti(string unidad) =>
+            unidad.ToLower() switch
             {
-                "uno" => "UNO" ,
+                "uno" => "UNO",
                 "dos" => "DOS",
                 "tres" => "TRES",
                 "cuatro" => "CUATRO",
@@ -350,6 +333,5 @@ namespace Business.Services.Utilities.PDF
                 "nueve" => "NUEVE",
                 _ => unidad.ToUpper()
             };
-        }
     }
 }

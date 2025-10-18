@@ -68,6 +68,9 @@ namespace Business.Services.Business
             _mapper = mapper;
         }
 
+        /// <summary>
+        /// Crea un contrato, gestionando la creación o recuperación de la persona y usuario asociados.
+        /// </summary>
         public async Task<int> CreateContractWithPersonHandlingAsync(ContractCreateDto dto)
         {
             ValidatePayload(dto);
@@ -90,6 +93,9 @@ namespace Business.Services.Business
             return contract.Id;
         }
 
+        /// <summary>
+        /// Obtiene los contratos asociados al usuario autenticado.
+        /// </summary>
         public async Task<IReadOnlyList<ContractCardDto>> GetMineAsync()
         {
             if (_user.EsAdministrador)
@@ -100,14 +106,15 @@ namespace Business.Services.Business
             }
 
             if (!_user.PersonId.HasValue || _user.PersonId.Value <= 0)
-            {
                 throw new BusinessException("El usuario autenticado no tiene persona asociada. Complete el perfil antes de consultar contratos.");
-            }
 
             var contracts = await _contractRepository.GetCardsByPersonAsync(_user.PersonId.Value);
             return contracts.ToList().AsReadOnly();
         }
 
+        /// <summary>
+        /// Obtiene las obligaciones mensuales de un contrato.
+        /// </summary>
         public async Task<IReadOnlyList<ObligationMonthSelectDto>> GetObligationsAsync(int contractId)
         {
             if (contractId <= 0)
@@ -116,6 +123,9 @@ namespace Business.Services.Business
             return await _obligationMonthService.GetByContractAsync(contractId);
         }
 
+        /// <summary>
+        /// Ejecuta el barrido de contratos expirados y libera los establecimientos asociados.
+        /// </summary>
         public async Task<ExpirationSweepResult> RunExpirationSweepAsync(CancellationToken ct = default)
         {
             var strategy = _context.Database.CreateExecutionStrategy();
@@ -142,8 +152,9 @@ namespace Business.Services.Business
             });
         }
 
-        // ----------------------- Helpers internos -----------------------
-
+        /// <summary>
+        /// Valida la carga útil de creación de contrato.
+        /// </summary>
         private void ValidatePayload(ContractCreateDto dto)
         {
             if (dto == null)
@@ -153,6 +164,9 @@ namespace Business.Services.Business
                 throw new BusinessException("Debe seleccionar al menos un establecimiento.");
         }
 
+        /// <summary>
+        /// Construye la entidad de contrato a partir del DTO y datos complementarios.
+        /// </summary>
         private Contract BuildContract(ContractCreateDto dto, int personId, decimal totalBaseRent, decimal totalUvt)
         {
             var contract = _mapper.Map<Contract>(dto);
@@ -161,7 +175,8 @@ namespace Business.Services.Business
             contract.TotalUvtQtyAgreed = totalUvt;
 
             contract.PremisesLeased = dto.EstablishmentIds
-                .Select(eid => new PremisesLeased { EstablishmentId = eid }).ToList();
+                .Select(eid => new PremisesLeased { EstablishmentId = eid })
+                .ToList();
 
             if (dto.ClauseIds is { Count: > 0 })
             {
@@ -174,18 +189,23 @@ namespace Business.Services.Business
             return contract;
         }
 
+        /// <summary>
+        /// Construye un snapshot del contrato recién creado.
+        /// </summary>
         private async Task<ContractSelectDto?> BuildSnapshotAsync(Contract contract)
         {
             var loaded = await _contractRepository.GetByIdAsync(contract.Id);
             return _mapper.Map<ContractSelectDto>(loaded ?? contract);
         }
 
+        /// <summary>
+        /// Compone el nombre completo de la persona asociada.
+        /// </summary>
         private string ComposeFullName(PersonSelectDto person)
             => $"{person.FirstName} {person.LastName}".Trim();
 
         /// <summary>
-        /// Manejo de post-commit: envío de correos y generación de obligaciones.
-        /// Fire-and-forget para que nunca bloquee la creación del contrato.
+        /// Programa tareas post-commit, como envío de correos y generación de obligaciones.
         /// </summary>
         private async Task SchedulePostCommitAsync(
             int contractId,
@@ -194,7 +214,6 @@ namespace Business.Services.Business
             string fullName,
             ContractSelectDto? contractSnapshot)
         {
-            // ---------- Enviar contraseña temporal en background ----------
             if (userResult.created && !string.IsNullOrWhiteSpace(userResult.tempPassword) && !string.IsNullOrWhiteSpace(email))
             {
                 _ = Task.Run(async () =>
@@ -220,7 +239,6 @@ namespace Business.Services.Business
                 });
             }
 
-            // ---------- Generar obligaciones después del commit ----------
             _uow.RegisterPostCommit(async ct =>
             {
                 try
@@ -236,7 +254,6 @@ namespace Business.Services.Business
                 }
             });
 
-            // ---------- Enviar correo con PDF en background ----------
             if (!string.IsNullOrWhiteSpace(email) && contractSnapshot != null)
             {
                 _ = Task.Run(async () =>

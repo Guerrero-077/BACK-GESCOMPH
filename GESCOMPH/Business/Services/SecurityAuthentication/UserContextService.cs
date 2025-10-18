@@ -10,6 +10,10 @@ using Utilities.Exceptions;
 
 namespace Business.Services.SecurityAuthentication
 {
+    /// <summary>
+    /// Servicio encargado de construir y mantener en caché el contexto de usuario (/me),
+    /// incluyendo roles, formularios, módulos y permisos asociados.
+    /// </summary>
     public class UserContextService : IUserContextService
     {
         private readonly IUserMeRepository _repo;
@@ -18,12 +22,25 @@ namespace Business.Services.SecurityAuthentication
 
         private static string Key(int userId) => $"UserContext:{userId}";
 
+        /// <summary>
+        /// Inicializa una nueva instancia del servicio de contexto de usuario.
+        /// </summary>
+        /// <param name="repo">Repositorio para obtener el contexto completo del usuario.</param>
+        /// <param name="mapper">Instancia de <see cref="IMapper"/> (no utilizada directamente aquí, pero mantenida por consistencia DI).</param>
+        /// <param name="cache">Caché en memoria para optimizar las consultas repetitivas.</param>
         public UserContextService(IUserMeRepository repo, IMapper mapper, IMemoryCache cache)
         {
             _repo = repo;
             _cache = cache;
         }
 
+        /// <summary>
+        /// Construye el contexto completo del usuario, incluyendo roles, permisos y menús,
+        /// con almacenamiento temporal en caché para mejorar el rendimiento.
+        /// </summary>
+        /// <param name="userId">Identificador del usuario.</param>
+        /// <returns>Un objeto <see cref="UserMeDto"/> con toda la información del contexto del usuario.</returns>
+        /// <exception cref="BusinessException">Si el usuario no existe o fue eliminado.</exception>
         public async Task<UserMeDto> BuildUserContextAsync(int userId)
         {
             var cacheKey = Key(userId);
@@ -31,9 +48,9 @@ namespace Business.Services.SecurityAuthentication
                 return cached;
 
             var user = await _repo.GetUserWithFullContextAsync(userId)
-                       ?? throw new BusinessException("Usuario no encontrado");
+                       ?? throw new BusinessException("Usuario no encontrado.");
 
-            // Roles activos y no eliminados (sin duplicados por Id)
+            // === Roles activos y válidos ===
             var roles = user.RolUsers?
                 .Select(ru => ru.Rol)
                 .Where(r => r != null && r.Active && !r.IsDeleted)
@@ -43,7 +60,7 @@ namespace Business.Services.SecurityAuthentication
 
             var roleNames = roles.Select(r => r.Name!).ToList();
 
-            // Forms permitidos por los roles (considerando solo RFP activos)
+            // === Formularios permitidos (por roles) ===
             var allowedForms = roles
                 .SelectMany(r => r.RolFormPermissions ?? Enumerable.Empty<RolFormPermission>())
                 .Where(rfp => rfp.Active && !rfp.IsDeleted)
@@ -53,7 +70,7 @@ namespace Business.Services.SecurityAuthentication
                 .Cast<Form>()
                 .ToList();
 
-            // Módulos (con forms filtrados por pertenencia al módulo)
+            // === Construcción de módulos y menús ===
             var modules = allowedForms
                 .SelectMany(f => f.FormModules ?? Enumerable.Empty<FormModule>())
                 .Select(fm => fm.Module)
@@ -72,6 +89,7 @@ namespace Business.Services.SecurityAuthentication
                         {
                             var formDto = f.Adapt<FormDto>();
 
+                            // Permisos del formulario, consolidados entre roles
                             var formPerms = roles
                                 .SelectMany(r => r.RolFormPermissions ?? Enumerable.Empty<RolFormPermission>())
                                 .Where(rfp => rfp.Active && !rfp.IsDeleted && rfp.FormId == f.Id && rfp.Permission != null)
@@ -89,7 +107,7 @@ namespace Business.Services.SecurityAuthentication
                 })
                 .ToList();
 
-            // Asigna PersonId
+            // === Construcción del DTO final ===
             var dto = new UserMeDto
             {
                 Id = user.Id,
@@ -106,9 +124,18 @@ namespace Business.Services.SecurityAuthentication
             return dto;
         }
 
-
+        /// <summary>
+        /// Invalida la caché del contexto de un usuario específico,
+        /// forzando su reconstrucción en la siguiente consulta.
+        /// </summary>
+        /// <param name="userId">Identificador del usuario.</param>
         public void InvalidateCache(int userId) => _cache.Remove(Key(userId));
 
+        /// <summary>
+        /// Normaliza el nombre de un permiso para su uso en comparaciones o UI.
+        /// </summary>
+        /// <param name="p">Nombre original del permiso.</param>
+        /// <returns>Permiso en mayúsculas y sin espacios.</returns>
         private static string NormalizePermission(string p)
             => p.Trim().ToUpperInvariant().Replace(" ", "_");
     }
