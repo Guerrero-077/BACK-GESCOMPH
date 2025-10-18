@@ -12,10 +12,7 @@ using Utilities.Helpers.CloudinaryHelper;
 namespace Business.Services.Utilities
 {
     /// <summary>
-    /// Servicio para manejar imágenes con Cloudinary. Incluye:
-    /// - Validación de archivos (delegada a CloudinaryUtility).
-    /// - Subida en paralelo con control de concurrencia.
-    /// - Rollback en Cloudinary si la persistencia falla.
+    /// Servicio encargado de manejar imágenes utilizando Cloudinary como proveedor de almacenamiento.
     /// </summary>
     public sealed class ImageService :
         BusinessGeneric<ImageSelectDto, ImageCreateDto, ImageUpdateDto, Images>, IImagesService
@@ -24,7 +21,6 @@ namespace Business.Services.Utilities
         private readonly CloudinaryUtility _cloudinary;
         private readonly ILogger<ImageService> _logger;
 
-        // Ajusta según tu infraestructura: 3 paralelos es buen punto medio
         private const int MaxParallelUploads = 3;
         private const int MaxFilesPerRequest = 5;
 
@@ -40,6 +36,14 @@ namespace Business.Services.Utilities
             _logger = logger;
         }
 
+        /// <summary>
+        /// Agrega múltiples imágenes asociadas a un establecimiento.
+        /// Valida formato, controla la concurrencia y realiza rollback en caso de error.
+        /// </summary>
+        /// <param name="establishmentId">Identificador del establecimiento.</param>
+        /// <param name="files">Colección de archivos a subir.</param>
+        /// <returns>Lista de imágenes creadas.</returns>
+        /// <exception cref="BusinessException">Cuando no se reciben archivos válidos o hay un error en el proceso.</exception>
         public async Task<List<ImageSelectDto>> AddImagesAsync(int establishmentId, IFormFileCollection files)
         {
             if (files is null || files.Count == 0)
@@ -47,6 +51,7 @@ namespace Business.Services.Utilities
 
             var allowedMime = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             { "image/jpeg", "image/png", "image/webp" };
+
             var allowedExt = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             { ".jpg", ".jpeg", ".png", ".webp" };
 
@@ -54,13 +59,14 @@ namespace Business.Services.Utilities
                 .Where(f => f?.Length > 0)
                 .Where(f =>
                 {
-                    var ct = f.ContentType ?? string.Empty;
-                    var ext = System.IO.Path.GetExtension(f.FileName) ?? string.Empty;
-                    if (!allowedMime.Contains(ct) || !allowedExt.Contains(ext))
+                    var contentType = f.ContentType ?? string.Empty;
+                    var ext = Path.GetExtension(f.FileName) ?? string.Empty;
+                    if (!allowedMime.Contains(contentType) || !allowedExt.Contains(ext))
                         throw new BusinessException($"El archivo '{f.FileName}' tiene un formato no permitido. Solo se permiten JPG, PNG o WEBP.");
                     return true;
                 })
                 .ToList();
+
             if (filesToUpload.Count == 0)
                 throw new BusinessException("No se recibieron archivos válidos.");
 
@@ -96,7 +102,6 @@ namespace Business.Services.Utilities
 
                 await Task.WhenAll(tasks);
 
-                // Persistir en BD
                 await _imagesRepository.AddRangeAsync(uploadedEntities);
 
                 _logger.LogInformation("Subidas {Count} imágenes para establecimiento {Id}", uploadedEntities.Count, establishmentId);
@@ -106,7 +111,6 @@ namespace Business.Services.Utilities
             {
                 _logger.LogError(ex, "Falló la subida/persistencia de imágenes para establecimiento {Id}. Ejecutando rollback...", establishmentId);
 
-                // Rollback en Cloudinary para lo que sí subió
                 var deletes = uploadedPublicIds.Select(pid => _cloudinary.DeleteAsync(pid));
                 await Task.WhenAll(deletes);
 
@@ -114,6 +118,10 @@ namespace Business.Services.Utilities
             }
         }
 
+        /// <summary>
+        /// Elimina una imagen identificada por su PublicId tanto en Cloudinary como en la base de datos.
+        /// </summary>
+        /// <param name="publicId">Identificador público en Cloudinary.</param>
         public async Task DeleteByPublicIdAsync(string publicId)
         {
             if (string.IsNullOrWhiteSpace(publicId))
@@ -123,20 +131,26 @@ namespace Business.Services.Utilities
             await _imagesRepository.DeleteByPublicIdAsync(publicId);
         }
 
+        /// <summary>
+        /// Elimina una imagen por su identificador interno en la base de datos.
+        /// También elimina el archivo remoto en Cloudinary.
+        /// </summary>
+        /// <param name="id">Identificador interno de la imagen.</param>
         public async Task DeleteByIdAsync(int id)
         {
-            // Cargar desde DB
             var img = await _imagesRepository.GetByIdAsync(id);
             if (img is null)
-                return; // idempotente: nada que borrar
+                return; // Idempotente
 
-            // Borrar en Cloudinary (idempotente)
             await _cloudinary.DeleteAsync(img.PublicId);
-
-            // Borrar fisicamente en DB (o soft si prefieres)
             await _imagesRepository.DeleteAsync(id);
         }
 
+        /// <summary>
+        /// Obtiene todas las imágenes asociadas a un establecimiento.
+        /// </summary>
+        /// <param name="establishmentId">Identificador del establecimiento.</param>
+        /// <returns>Lista de imágenes relacionadas.</returns>
         public async Task<List<ImageSelectDto>> GetImagesByEstablishmentIdAsync(int establishmentId)
         {
             var images = await _imagesRepository.GetByEstablishmentIdAsync(establishmentId);

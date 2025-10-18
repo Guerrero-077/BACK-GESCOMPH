@@ -25,7 +25,7 @@ public class UserControllerTests
     public async Task Post_CreatedAt()
     {
         var created = new UserSelectDto { Id = 5, Email = "e@mail" };
-        _svc.Setup(s => s.CreateWithPersonAndRolesAsync(It.IsAny<UserCreateDto>())).ReturnsAsync(created);
+        _svc.Setup(s => s.CreateAsync(It.IsAny<UserCreateDto>())).ReturnsAsync(created);
         var res = await Create().Post(new UserCreateDto { Email = "e@mail", FirstName = "A", LastName = "B", Document = "1", CityId = 1, Phone = "P", Address = "X" });
         Assert.IsType<CreatedAtActionResult>(res.Result);
     }
@@ -34,7 +34,7 @@ public class UserControllerTests
     public async Task Put_Ok()
     {
         var updated = new UserSelectDto { Id = 6, Email = "e@mail" };
-        _svc.Setup(s => s.UpdateWithPersonAndRolesAsync(It.IsAny<UserUpdateDto>())).ReturnsAsync(updated);
+        _svc.Setup(s => s.UpdateAsync(It.IsAny<UserUpdateDto>())).ReturnsAsync(updated);
         var res = await Create().Put(6, new UserUpdateDto { Id = 6, Email = "e@mail", FirstName = "A", LastName = "B", Phone = "P", Address = "X", CityId = 1 });
         Assert.IsType<OkObjectResult>(res.Result);
     }
