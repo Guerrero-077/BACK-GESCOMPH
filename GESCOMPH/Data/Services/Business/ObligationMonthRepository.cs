@@ -3,6 +3,7 @@ using Data.Repository;
 using Entity.Domain.Models.Implements.Business;
 using Entity.Infrastructure.Context;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 
 namespace Data.Services.Business
 {
@@ -34,6 +35,37 @@ namespace Data.Services.Business
                                   && o.PaymentDate.Value.Date == date.Date)
                               .SumAsync(o => o.TotalAmount);
         }
+
+        /// <summary>
+        /// Metodo que me carga el valor total pagado los
+        /// ultimos meses apartir desde el vigente asi atras
+        /// </summary>
+        /// <returns>
+        /// { "label": "May", "total": 2000000 }
+        /// </returns>
+
+        public async Task<IEnumerable<object>> GetLastSixMonthsPaidAsync()
+        {
+            var today = DateTime.Today;
+            var currentMonth = new DateTime(today.Year, today.Month, 1);
+            var sixMonthsAgo = currentMonth.AddMonths(-5);
+
+            var result = await _context.ObligationMonths
+                .Where(o => o.Status == "PAID"
+                            && o.PaymentDate != null
+                            && o.PaymentDate >= sixMonthsAgo
+                            && o.PaymentDate < currentMonth.AddMonths(1))
+                .GroupBy(o => new { o.PaymentDate!.Value.Year, o.PaymentDate.Value.Month })
+                .Select(g => new
+                {
+                    Label = CultureInfo.CurrentCulture.DateTimeFormat.GetAbbreviatedMonthName(g.Key.Month),
+                    Total = g.Sum(x => x.TotalAmount)
+                })
+                .ToListAsync();
+
+            return result;
+        }
+
 
         public async Task<decimal> GetTotalObligationsPaidByMonthAsync(int year, int month)
         {

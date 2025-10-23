@@ -63,6 +63,11 @@ namespace Business.Services.Business
             await UpsertObligationAsync(contract, monthStart, uvtValue, vatRate);
         }
 
+        public async Task<IEnumerable<object>> GetLastSixMonthsPaidAsync()
+        {
+            return await _obligationRepository.GetLastSixMonthsPaidAsync();
+        }
+
         public async Task<IReadOnlyList<ObligationMonthSelectDto>> GetByContractAsync(int contractId)
         {
             if (contractId <= 0)

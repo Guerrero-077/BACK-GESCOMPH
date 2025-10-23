@@ -140,6 +140,14 @@ namespace WebGESCOMPH.Controllers.Module.Business
             }
         }
 
+        [HttpGet("LastSixMonthsPaid")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetLastSixMonthsPaid()
+        {
+            var data = await _svc.GetLastSixMonthsPaidAsync();
+            return Ok(data);
+        }
+
         // ------------------------ Helpers ------------------------
         private (int year, int month) ResolvePeriod(int? year, int? month)
         {

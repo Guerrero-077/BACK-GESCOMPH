@@ -9,5 +9,6 @@ namespace Data.Interfaz.IDataImplement.Business
         IQueryable<ObligationMonth> GetByContractQueryable(int contractId);
         Task<decimal> GetTotalObligationsPaidByMonthAsync(int year, int month);
         Task<decimal> GetTotalObligationsPaidByDayAsync(DateTime date);
+        Task<IEnumerable<object>> GetLastSixMonthsPaidAsync();
     }
 }

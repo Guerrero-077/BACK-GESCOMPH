@@ -30,6 +30,9 @@ namespace Business.Interfaces.Implements.Business
         /// </summary>
         Task MarkAsPaidAsync(int id);
 
+        Task<IEnumerable<object>> GetLastSixMonthsPaidAsync();
+
+
         Task<decimal> GetTotalObligationsPaidByDayAsync(DateTime date);
         Task<decimal> GetTotalObligationsPaidByMonthAsync(int year, int month);
     }
