@@ -2,6 +2,7 @@
 using Entity.DTOs.Implements.Business.ObligationMonth;
 using Hangfire;
 using Hangfire.Server;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -18,7 +19,7 @@ namespace WebGESCOMPH.Controllers.Module.Business
     [ApiController]
     [Route("api/obligation-months")]
     [Produces("application/json")]
-    // [Authorize(Roles = "Administrador")]
+    [Authorize(Roles = "Administrador")]
     public sealed class ObligationMonthsController
            : BaseController<ObligationMonthSelectDto, ObligationMonthDto, ObligationMonthUpdateDto>
     {
